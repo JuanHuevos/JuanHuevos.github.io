@@ -62,37 +62,69 @@ function obtenerClaseAbundancia(nivel) {
 }
 
 // =====================================================
-// NAVEGACIÓN HUD
+// CONTROL DE TURNOS
 // =====================================================
 
-function renderizarNavegacionHUD() {
-  const pestanas = [
-    { id: 'resumen', icono: '📊', label: 'Resumen' },
-    { id: 'produccion', icono: '⚒️', label: 'Producción' },
-    { id: 'crecimiento', icono: '📈', label: 'Crecimiento' },
-    { id: 'edificios', icono: '🏛️', label: 'Edificios' }
-  ];
+// CONTROL DE TURNOS
+// =====================================================
 
-  return `
-    <nav class="hud-nav">
-      ${pestanas.map(p => `
-        <button 
-          class="nav-item ${pestanaActiva === p.id ? 'activo' : ''}" 
-          onclick="cambiarPestana('${p.id}')">
-          <span class="nav-icono">${p.icono}</span>
-          <span class="nav-label">${p.label}</span>
-        </button>
-      `).join('')}
-    </nav>
-  `;
-}
+function btnPasarTurno() {
+  // Get current settlement
+  const asentamientoActual = obtenerAsentamientoActual();
+  if (!asentamientoActual) {
+    mostrarNotificacion('No hay asentamiento seleccionado', 'error');
+    return;
+  }
 
-function cambiarPestana(pestana) {
-  pestanaActiva = pestana;
+  // Execute the turn
+  const resultado = ejecutarTurno(asentamientoActual);
+
+  // Update settlement simulation state
+  asentamientoActual.simulacion = JSON.parse(JSON.stringify(estadoSimulacion));
+
+  // Save expedition
+  guardarExpedicion();
+
+  // Show notification
+  mostrarNotificacion(`Turno ${resultado.turno} completado`, 'success');
+
+  // Re-render UI
   renderizarPantalla();
 }
 
-// =====================================================
+function btnDeshacerTurno() {
+  if (deshacerTurno()) {
+    // Update settlement simulation state
+    const asentamientoActual = obtenerAsentamientoActual();
+    if (asentamientoActual) {
+      asentamientoActual.simulacion = JSON.parse(JSON.stringify(estadoSimulacion));
+      guardarExpedicion();
+    }
+
+    mostrarNotificacion('Turno deshecho', 'info');
+    renderizarPantalla();
+  } else {
+    mostrarNotificacion('No hay turnos para deshacer', 'warning');
+  }
+}
+
+function obtenerAsentamientoActual() {
+  if (!estadoApp.asentamientoActual || !estadoApp.expedicion || !estadoApp.expedicion.asentamientos) {
+    return null;
+  }
+
+  // asentamientoActual can be either the object itself or just an ID
+  const ref = estadoApp.asentamientoActual;
+
+  // If it's already an object with an id, return it directly (or find it in the array)
+  if (typeof ref === 'object' && ref.id !== undefined) {
+    return estadoApp.expedicion.asentamientos.find(a => a.id === ref.id) || ref;
+  }
+
+  // If it's just an ID, find the matching settlement
+  return estadoApp.expedicion.asentamientos.find(a => a.id === ref);
+}
+
 // RENDERIZADO DE PANTALLAS
 // =====================================================
 
@@ -118,6 +150,11 @@ function renderizarPantalla() {
     default:
       renderizarInicio(container);
   }
+}
+
+function actualizarHUD() {
+  // Wrapper to refresh the current screen, assuming it's the HUD
+  renderizarPantalla();
 }
 
 /**
@@ -700,84 +737,115 @@ function renderizarPasoNombre() {
 }
 
 // =====================================================
-// PASO 2: DETERMINACIÓN DE BIOMA (d12 + d6)
+// PASO 2: SELECCIÓN DE BIOMAS (MANUAL, MULTI-SELECCIÓN)
 // =====================================================
 function renderizarPasoBioma() {
+  // Initialize if needed
+  if (!wizardState.biomasSeleccionados) {
+    wizardState.biomasSeleccionados = [];
+  }
+
+  const seleccionados = wizardState.biomasSeleccionados;
+
+  // Aggregate properties from all selected biomes
+  const propiedadesMerged = new Set();
+  const recursosMerged = new Set();
+  let influenciaMagica = null;
+
+  seleccionados.forEach(nombre => {
+    const bioma = BIOMAS_BASE[nombre] || BIOMAS_ESPECIALES[nombre];
+    if (bioma) {
+      (bioma.propiedadesBase || bioma.propiedades || []).forEach(p => propiedadesMerged.add(p));
+      (bioma.recursos || []).forEach(r => recursosMerged.add(r));
+      if (!influenciaMagica) influenciaMagica = bioma.influenciaMagica;
+    }
+  });
+
   return `
     <div class="paso-contenido paso-bioma">
-      <h3>🎲 Determinar Bioma</h3>
-      <p>Lanza el d12 para determinar el tipo de bioma de tu territorio</p>
+      <h3>🌍 Seleccionar Biomas</h3>
+      <p>Selecciona uno o más biomas para tu territorio. Las propiedades se combinarán.</p>
       
-      <div class="bioma-tirada-panel">
-        <div class="tirada-seccion">
-          <h4>Paso 1: Tirar d12</h4>
-          <p class="tirada-info">1-6: Bioma Base | 7-11: Bioma Especial | 12: Repetir</p>
-          <button class="btn-tirar-dado grande" onclick="tirarD12Bioma()">
-            🎲 Tirar d12
-          </button>
+      <div class="bioma-seleccion-grid">
+        <div class="bioma-botones">
+          ${[...Object.entries(BIOMAS_BASE), ...Object.entries(BIOMAS_ESPECIALES)].map(([nombre, data]) => `
+            <button class="btn-bioma-toggle ${seleccionados.includes(nombre) ? 'seleccionado' : ''}"
+                    onclick="toggleBiomaSeleccion('${nombre}')">
+              ${data.icono} ${nombre}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+      
+      ${seleccionados.length > 0 ? `
+        <div class="bioma-resumen" style="margin-top: 2rem;">
+          <h4>📋 Resumen de Selección (${seleccionados.length} bioma${seleccionados.length > 1 ? 's' : ''})</h4>
           
-          ${wizardState.tiradaD12 !== null ? `
-            <div class="resultado-tirada ${wizardState.esBiomaEspecial ? 'especial' : 'base'}">
-              <span class="tirada-numero">${wizardState.tiradaD12}</span>
-              <span class="tirada-resultado">
-                ${wizardState.esBiomaEspecial
-        ? `🌟 ${wizardState.biomaEspecial}`
-        : `🌍 ${wizardState.biomaBase}`
-      }
-              </span>
+          <div class="biomas-seleccionados-lista">
+            ${seleccionados.map(n => {
+    const b = BIOMAS_BASE[n] || BIOMAS_ESPECIALES[n];
+    return `<span class="tag-mini">${b?.icono || '🌍'} ${n}</span>`;
+  }).join('')}
+          </div>
+          
+          <div class="resumen-seccion" style="margin-top: 1rem;">
+            <h5>Propiedades Combinadas</h5>
+            <div class="tags-mini">
+              ${[...propiedadesMerged].map(p => `
+                <span class="tag-mini">${PROPIEDADES[p]?.icono || '📍'} ${p}</span>
+              `).join('')}
+            </div>
+          </div>
+          
+          ${influenciaMagica ? `
+            <div class="resumen-seccion" style="margin-top: 0.5rem;">
+              <h5>Influencia Mágica</h5>
+              <span class="influencia-badge ${influenciaMagica.toLowerCase()}">${INFLUENCIA_MAGICA[influenciaMagica]?.icono} ${influenciaMagica}</span>
             </div>
           ` : ''}
         </div>
-        
-        ${wizardState.esBiomaEspecial && wizardState.biomaEspecial ? `
-          <div class="tirada-seccion sub-bioma">
-            <h4>Paso 2: Tirar d6 (Sub-Bioma)</h4>
-            <p class="tirada-info">El bioma especial se superpone sobre un bioma base</p>
-            <button class="btn-tirar-dado" onclick="tirarD6SubBioma()">
-              🎲 Tirar d6
-            </button>
-            
-            ${wizardState.subBioma ? `
-              <div class="resultado-tirada sub">
-                <span class="tirada-numero">${wizardState.tiradaSubBioma}</span>
-                <span class="tirada-resultado">
-                  ${BIOMAS_BASE[wizardState.subBioma]?.icono} ${wizardState.subBioma}
-                </span>
-              </div>
-            ` : ''}
-          </div>
-        ` : ''}
-      </div>
-      
-      ${renderizarResumenBioma()}
-      
-      <div class="bioma-manual">
-        <details>
-          <summary>📝 Seleccionar manualmente</summary>
-          <div class="seleccion-manual-grid">
-            <div class="manual-columna">
-              <h5>Biomas Base</h5>
-              ${Object.entries(BIOMAS_BASE).map(([nombre, data]) => `
-                <button class="btn-bioma-manual ${wizardState.biomaBase === nombre && !wizardState.esBiomaEspecial ? 'seleccionado' : ''}"
-                        onclick="seleccionarBiomaManual('base', '${nombre}')">
-                  ${data.icono} ${nombre}
-                </button>
-              `).join('')}
-            </div>
-            <div class="manual-columna">
-              <h5>Biomas Especiales</h5>
-              ${Object.entries(BIOMAS_ESPECIALES).map(([nombre, data]) => `
-                <button class="btn-bioma-manual ${wizardState.biomaEspecial === nombre ? 'seleccionado' : ''}"
-                        onclick="seleccionarBiomaManual('especial', '${nombre}')">
-                  ${data.icono} ${nombre}
-                </button>
-              `).join('')}
-            </div>
-          </div>
-        </details>
-      </div>
+      ` : '<p class="sin-recursos" style="margin-top: 2rem;">Selecciona al menos un bioma</p>'}
     </div>
   `;
+}
+
+function toggleBiomaSeleccion(nombre) {
+  if (!wizardState.biomasSeleccionados) {
+    wizardState.biomasSeleccionados = [];
+  }
+
+  const idx = wizardState.biomasSeleccionados.indexOf(nombre);
+  if (idx >= 0) {
+    wizardState.biomasSeleccionados.splice(idx, 1);
+  } else {
+    wizardState.biomasSeleccionados.push(nombre);
+  }
+
+  // Rebuild Aggregations
+  const propiedadesMerged = new Set();
+  let influenciaMagica = null;
+
+  wizardState.biomasSeleccionados.forEach(n => {
+    const bioma = BIOMAS_BASE[n] || BIOMAS_ESPECIALES[n];
+    if (bioma) {
+      // Use propiedadesBase for base biomes, propiedadesCapa for special biomes
+      const props = bioma.propiedadesBase || bioma.propiedadesCapa || [];
+      props.forEach(p => propiedadesMerged.add(p));
+      if (!influenciaMagica) influenciaMagica = bioma.influenciaMagica;
+    }
+  });
+
+  wizardState.propiedades = [...propiedadesMerged];
+  wizardState.influenciaMagica = influenciaMagica;
+
+  // Set biomaBase for compatibility (first selected)
+  if (wizardState.biomasSeleccionados.length > 0) {
+    wizardState.biomaBase = wizardState.biomasSeleccionados[0];
+  } else {
+    wizardState.biomaBase = null;
+  }
+
+  renderizarPantalla();
 }
 
 function renderizarResumenBioma() {
@@ -912,29 +980,59 @@ function seleccionarBiomaManual(tipo, nombre) {
 }
 
 // =====================================================
-// PASO 3: PROPIEDADES Y PECULIARIDADES
+// PASO 3: PROPIEDADES DEL TERRENO (SELECCIÓN MANUAL)
 // =====================================================
 function renderizarPasoPropiedades() {
-  // Propiedades ya vienen del bioma
-  const propiedadesBioma = wizardState.propiedades;
+  // Collect suggested properties from selected biomes
+  const propiedadesSugeridas = new Set();
+  (wizardState.biomasSeleccionados || []).forEach(nombre => {
+    const bioma = BIOMAS_BASE[nombre] || BIOMAS_ESPECIALES[nombre];
+    if (bioma) {
+      // Use propiedadesBase for base biomes, propiedadesCapa for special biomes
+      const props = bioma.propiedadesBase || bioma.propiedadesCapa || [];
+      props.forEach(p => {
+        if (p !== 'Bioma Secundario') propiedadesSugeridas.add(p);
+      });
+    }
+  });
+
+  // Current selected properties
+  const propiedadesActivas = wizardState.propiedades || [];
 
   return `
     <div class="paso-contenido paso-seleccion">
       <h3>🌍 Propiedades del Terreno</h3>
-      <p>Las propiedades base vienen del bioma. Puedes agregar o quitar propiedades adicionales.</p>
+      <p>Selecciona las propiedades de tu territorio. Las sugeridas por los biomas están resaltadas.</p>
       
-      <div class="propiedades-actuales">
-        <h4>Propiedades Activas (del Bioma)</h4>
+      <div class="propiedades-grid">
+        ${Object.entries(PROPIEDADES)
+      .filter(([nombre]) => nombre !== 'Bioma Secundario')
+      .map(([nombre, data]) => {
+        const esSugerida = propiedadesSugeridas.has(nombre);
+        const seleccionada = propiedadesActivas.includes(nombre);
+        return `
+              <button class="btn-propiedad-toggle ${seleccionada ? 'seleccionado' : ''} ${esSugerida ? 'sugerida' : ''}"
+                      onclick="togglePropiedad('${nombre}')">
+                <span class="prop-icono">${data.icono}</span>
+                <span class="prop-nombre">${nombre}</span>
+                ${esSugerida ? '<span class="badge-sugerida">✓ Bioma</span>' : ''}
+              </button>
+            `;
+      }).join('')}
+      </div>
+      
+      <div class="propiedades-resumen" style="margin-top: 2rem;">
+        <h4>Propiedades Activas (${propiedadesActivas.length})</h4>
         <div class="tags-lista">
-          ${propiedadesBioma.map(p => `
+          ${propiedadesActivas.length > 0 ? propiedadesActivas.map(p => `
             <span class="tag activo">${PROPIEDADES[p]?.icono} ${p}</span>
-          `).join('')}
+          `).join('') : '<span class="sin-recursos">Ninguna seleccionada</span>'}
         </div>
       </div>
       
-      <div class="seccion-peculiaridades">
+      <div class="seccion-peculiaridades" style="margin-top: 2rem;">
         <h4>✨ Peculiaridades del Territorio</h4>
-        <p>Selecciona características especiales adicionales</p>
+        <p>Características especiales adicionales</p>
         
         ${wizardState.peculiaridadFija ? `
           <div class="peculiaridad-fija">
@@ -944,9 +1042,9 @@ function renderizarPasoPropiedades() {
         
         <div class="seleccion-grid">
           ${Object.entries(PECULIARIDADES).map(([nombre, data]) => {
-    const esFija = wizardState.peculiaridadFija === nombre;
-    const seleccionada = wizardState.peculiaridades.includes(nombre);
-    return `
+        const esFija = wizardState.peculiaridadFija === nombre;
+        const seleccionada = wizardState.peculiaridades.includes(nombre);
+        return `
               <div class="opcion-card ${seleccionada ? 'seleccionado' : ''} ${esFija ? 'fija' : ''}" 
                    onclick="${esFija ? '' : `togglePeculiaridad('${nombre}')`}">
                 <div class="opcion-header">
@@ -962,191 +1060,117 @@ function renderizarPasoPropiedades() {
                 </div>
               </div>
             `;
-  }).join('')}
+      }).join('')}
         </div>
       </div>
     </div>
   `;
 }
 
+function togglePropiedad(nombre) {
+  if (!wizardState.propiedades) wizardState.propiedades = [];
+
+  const idx = wizardState.propiedades.indexOf(nombre);
+  if (idx >= 0) {
+    wizardState.propiedades.splice(idx, 1);
+  } else {
+    wizardState.propiedades.push(nombre);
+  }
+  renderizarPantalla();
+}
+
 // =====================================================
-// PASO 4: RECURSOS Y ABUNDANCIA
+// PASO 4: RECURSOS DEL TERRITORIO (SELECCIÓN MANUAL)
 // =====================================================
 function renderizarPasoRecursos() {
-  const biomaActual = wizardState.biomaFusionado || (wizardState.biomaBase ? BIOMAS_BASE[wizardState.biomaBase] : null);
+  // Collect suggested resources from selected biomes
+  const recursosSugeridos = new Set();
+  (wizardState.biomasSeleccionados || []).forEach(nombre => {
+    const bioma = BIOMAS_BASE[nombre] || BIOMAS_ESPECIALES[nombre];
+    if (bioma) {
+      (bioma.recursos || []).forEach(r => recursosSugeridos.add(r));
+      (bioma.exoticos || []).forEach(r => recursosSugeridos.add(r));
+      (bioma.recursosGarantizados || []).forEach(r => recursosSugeridos.add(r));
+    }
+  });
 
-  if (!biomaActual) {
-    return `
-      <div class="paso-contenido">
-        <h3>⚠️ Selecciona un bioma primero</h3>
-        <p>Vuelve al paso 2 para determinar el bioma de tu asentamiento.</p>
-      </div>
-    `;
-  }
-
-  const recursos = biomaActual.recursos || [];
-  const recursosGarantizados = biomaActual.recursosGarantizados || [];
-  const exoticos = biomaActual.exoticos || [];
-  const modificadoresPropiedades = calcularModificadoresRecursos(wizardState.propiedades);
-
-  // Identificar recursos adicionales (agregados manualmente)
-  const recursosAdicionales = Object.keys(wizardState.recursos).filter(r =>
-    !recursos.includes(r) && !exoticos.includes(r) && !recursosGarantizados.includes(r)
-  );
+  // Current selected resources
+  const recursosActivos = Object.keys(wizardState.recursos || {});
+  const modificadoresPropiedades = calcularModificadoresRecursos(wizardState.propiedades || []);
 
   return `
     <div class="paso-contenido paso-recursos">
       <h3>📦 Recursos del Territorio</h3>
-      <p>Configura la abundancia de cada recurso. Los dados REEMPLAZAN el resultado anterior.</p>
+      <p>Selecciona qué recursos existen en tu territorio. Los de tus biomas están resaltados.</p>
       
-      ${recursosGarantizados.length > 0 ? `
-        <div class="recursos-fijos-panel">
-          <h4>✨ Recursos Garantizados (Nivel Normal automático)</h4>
-          <div class="recursos-fijos-lista">
-            ${recursosGarantizados.map(r => {
-    const mod = modificadoresPropiedades[r] || 0;
+      <div class="recursos-seleccion-grid">
+        ${Object.entries(RECURSOS).map(([nombre, data]) => {
+    const esSugerido = recursosSugeridos.has(nombre);
+    const seleccionado = recursosActivos.includes(nombre);
     return `
-                <span class="recurso-fijo">
-                  ${RECURSOS[r]?.icono || '📦'} ${r}
-                  ${mod !== 0 ? `<span class="mod ${mod > 0 ? 'positivo' : 'negativo'}">${formatearValor(mod)}</span>` : ''}
-                </span>
-              `;
-  }).join('')}
-          </div>
-        </div>
-      ` : ''}
-      
-      <div class="recursos-panel">
-        <div class="recursos-header">
-          <h4>🎲 Recursos del Bioma (${biomaActual.dado || 'd6'})</h4>
-          <button class="btn-tirar-dado" onclick="tirarRecursoBioma()">
-            🎲 Tirar (1 Abundante, 2 Escasos)
-          </button>
-        </div>
-        
-        <div class="recursos-tabla">
-          <div class="recursos-tabla-header">
-            <span>#</span>
-            <span>Recurso</span>
-            <span>Abundancia</span>
-            <span>Mod. Prop.</span>
-          </div>
-          ${recursos.map((recurso, idx) => {
-    const estado = wizardState.recursos[recurso] || { abundancia: "Inexistente", tirada: null };
-    const mod = modificadoresPropiedades[recurso] || 0;
-    const modAbundancia = obtenerModificadorAbundancia(estado.abundancia);
-    const modTotal = mod + modAbundancia;
-
-    return `
-              <div class="recurso-row">
-                <span class="recurso-numero">${idx + 1}</span>
-                <span class="recurso-nombre">
-                  ${RECURSOS[recurso]?.icono || '📦'} ${recurso}
-                </span>
-                <div class="recurso-abundancia">
-                  <select onchange="cambiarAbundancia('${recurso}', this.value)" class="select-abundancia ${obtenerClaseAbundancia(estado.abundancia)}">
-                    ${Object.keys(NIVELES_ABUNDANCIA).map(nivel => `
-                      <option value="${nivel}" ${estado.abundancia === nivel ? 'selected' : ''}>${nivel}</option>
-                    `).join('')}
-                  </select>
-                </div>
-                <span class="recurso-mod ${modTotal > 0 ? 'positivo' : modTotal < 0 ? 'negativo' : 'neutro'}">
-                  ${modTotal !== 0 ? formatearValor(modTotal) : '-'}
-                </span>
-              </div>
+              <button class="btn-recurso-toggle ${seleccionado ? 'seleccionado' : ''} ${esSugerido ? 'sugerido' : ''}"
+                      onclick="toggleRecursoSeleccion('${nombre}')">
+                <span class="rec-icono">${data.icono}</span>
+                <span class="rec-nombre">${nombre}</span>
+                ${esSugerido ? '<span class="badge-sugerida">✓ Bioma</span>' : ''}
+              </button>
             `;
   }).join('')}
-        </div>
       </div>
       
-      <div class="recursos-panel exoticos">
-        <div class="recursos-header">
-          <h4>💎 Recursos Exóticos (${biomaActual.dadoExotico || 'd4'})</h4>
-          <button class="btn-tirar-dado exotico" onclick="tirarRecursoExotico()">
-            🎲 Descubrir 1 Exótico
-          </button>
-        </div>
-        <p class="exoticos-nota">Los exóticos son "Inexistentes" hasta ser descubiertos mediante exploración</p>
-        
-        <div class="recursos-tabla">
-          ${exoticos.map((recurso, idx) => {
-    const estado = wizardState.recursos[recurso] || { abundancia: "Inexistente", tirada: null };
-    const mod = modificadoresPropiedades[recurso] || 0;
-
-    return `
-              <div class="recurso-row exotico ${estado.abundancia !== 'Inexistente' ? 'descubierto' : ''}">
-                <span class="recurso-numero">${idx + 1}</span>
-                <span class="recurso-nombre">
-                  ${RECURSOS[recurso]?.icono || '💎'} ${recurso}
-                </span>
-                <div class="recurso-abundancia">
-                  <select onchange="cambiarAbundancia('${recurso}', this.value)" class="select-abundancia ${obtenerClaseAbundancia(estado.abundancia)}">
-                    ${Object.keys(NIVELES_ABUNDANCIA).map(nivel => `
-                      <option value="${nivel}" ${estado.abundancia === nivel ? 'selected' : ''}>${nivel}</option>
-                    `).join('')}
-                  </select>
-                </div>
-                <span class="recurso-mod ${mod > 0 ? 'positivo' : mod < 0 ? 'negativo' : 'neutro'}">
-                  ${mod !== 0 ? formatearValor(mod) : '-'}
-                </span>
-              </div>
-            `;
-  }).join('')}
-        </div>
-      </div>
-
-      ${recursosAdicionales.length > 0 ? `
-        <div class="recursos-panel adicionales">
-          <div class="recursos-header">
-            <h4>➕ Recursos Adicionales</h4>
-          </div>
+      ${recursosActivos.length > 0 ? `
+        <div class="recursos-configuracion" style="margin-top: 2rem;">
+          <h4>Configurar Abundancia (${recursosActivos.length} recursos)</h4>
           <div class="recursos-tabla">
-            ${recursosAdicionales.map((recurso, idx) => {
-    const estado = wizardState.recursos[recurso];
+            <div class="recursos-tabla-header">
+              <span>Recurso</span>
+              <span>Abundancia</span>
+              <span>Mod.</span>
+              <span></span>
+            </div>
+            ${recursosActivos.map(recurso => {
+    const estado = wizardState.recursos[recurso] || { abundancia: "Normal" };
     const mod = modificadoresPropiedades[recurso] || 0;
     const modAbundancia = obtenerModificadorAbundancia(estado.abundancia);
     const modTotal = mod + modAbundancia;
 
     return `
-                <div class="recurso-row adicional">
-                  <span class="recurso-numero">+</span>
-                  <span class="recurso-nombre">
-                    ${RECURSOS[recurso]?.icono || '📦'} ${recurso}
-                  </span>
-                  <div class="recurso-abundancia">
-                    <select onchange="cambiarAbundancia('${recurso}', this.value)" class="select-abundancia ${obtenerClaseAbundancia(estado.abundancia)}">
-                       ${Object.keys(NIVELES_ABUNDANCIA).map(nivel => `
-                        <option value="${nivel}" ${estado.abundancia === nivel ? 'selected' : ''}>${nivel}</option>
-                      `).join('')}
-                    </select>
+                  <div class="recurso-row">
+                    <span class="recurso-nombre">
+                      ${RECURSOS[recurso]?.icono || '📦'} ${recurso}
+                    </span>
+                    <div class="recurso-abundancia">
+                      <select onchange="cambiarAbundancia('${recurso}', this.value)" class="select-abundancia ${obtenerClaseAbundancia(estado.abundancia)}">
+                        ${Object.keys(NIVELES_ABUNDANCIA).filter(n => n !== 'Inexistente').map(nivel => `
+                          <option value="${nivel}" ${estado.abundancia === nivel ? 'selected' : ''}>${nivel}</option>
+                        `).join('')}
+                      </select>
+                    </div>
+                    <span class="recurso-mod ${modTotal > 0 ? 'positivo' : modTotal < 0 ? 'negativo' : 'neutro'}">
+                      ${modTotal !== 0 ? formatearValor(modTotal) : '-'}
+                    </span>
+                    <button class="btn-eliminar-recurso" onclick="toggleRecursoSeleccion('${recurso}')">🗑️</button>
                   </div>
-                  <span class="recurso-mod ${modTotal > 0 ? 'positivo' : modTotal < 0 ? 'negativo' : 'neutro'}">
-                     ${modTotal !== 0 ? formatearValor(modTotal) : '-'}
-                  </span>
-                  <button class="btn-eliminar-recurso" onclick="eliminarRecursoManual('${recurso}')">🗑️</button>
-                </div>
-              `;
+                `;
   }).join('')}
           </div>
         </div>
-      ` : ''}
-
-      <div class="bioma-manual" style="margin-top: 1.5rem;">
-        <details>
-          <summary>📝 Agregar recurso manualmente</summary>
-          <div class="agregar-recurso-container" style="display: flex; gap: 0.5rem; margin-top: 1rem; align-items: center;">
-            <select id="select-recurso-manual" class="input-nombre" style="flex: 1; text-align: left; max-width: 300px;">
-              <option value="">-- Seleccionar Recurso --</option>
-              ${Object.keys(RECURSOS).sort().map(r => `<option value="${r}">${RECURSOS[r].icono} ${r}</option>`).join('')}
-            </select>
-            <button class="btn-principal" style="width: auto; padding: 0.5rem 1rem; font-size: 0.9rem;" onclick="agregarRecursoManual()">Agregar</button>
-          </div>
-        </details>
-      </div>
-      
-
+      ` : '<p class="sin-recursos" style="margin-top: 2rem;">Selecciona los recursos que existen en tu territorio</p>'}
     </div>
   `;
+}
+
+function toggleRecursoSeleccion(nombre) {
+  if (!wizardState.recursos) wizardState.recursos = {};
+
+  if (wizardState.recursos[nombre]) {
+    // Remove
+    delete wizardState.recursos[nombre];
+  } else {
+    // Add with default abundance
+    wizardState.recursos[nombre] = { abundancia: "Normal" };
+  }
+  renderizarPantalla();
 }
 
 /**
@@ -1402,6 +1426,18 @@ function renderizarPasoPoblacion() {
               <small>${NATURALEZAS_POBLACION[config.naturaleza]?.descripcion || ''}</small>
             </div>
             
+            ${config.naturaleza === 'Artificial' ? `
+              <div class="poblacion-campo">
+                <label>Subtipo Artificial:</label>
+                <select onchange="actualizarPoblacion(${idx}, 'subtipo', this.value)" class="select-poblacion">
+                  ${["Neutral", "Positiva", "Negativa", "Monstruo"].map(s => `
+                    <option value="${s}" ${(config.subtipo || 'Neutral') === s ? 'selected' : ''}>${NATURALEZAS_POBLACION[s]?.icono || '⚪'} ${s}</option>
+                  `).join('')}
+                </select>
+                <small>Define el subtipo base de los Artificiales</small>
+              </div>
+            ` : ''}
+            
             <div class="poblacion-campo">
               <label>Cuotas:</label>
               <div class="cantidad-control">
@@ -1504,7 +1540,7 @@ function renderizarPasoEdificios() {
     wizardState.edificios = [];
     if (!esPrimero) {
       // Si no es el primero, asignar Zona Residencial automáticamente
-      wizardState.edificios = ["Zona Residencial (1)"];
+      wizardState.edificios = ["Zona Residencial"];
     }
   }
 
@@ -1523,7 +1559,7 @@ function renderizarPasoEdificios() {
       <div class="edificios-grid">
         ${EDIFICIOS_INICIALES.map(edificio => {
         const esSeleccionado = wizardState.edificios.includes(edificio);
-        const esBloqueado = !esPrimero && edificio === "Zona Residencial (1)";
+        const esBloqueado = !esPrimero && edificio === "Zona Residencial";
         const esDeshabilitado = !esSeleccionado && seleccionados >= limiteEdificios && esPrimero;
 
         return `
@@ -1603,7 +1639,14 @@ function renderizarPasoConfirmacion() {
         <div class="badges-confirmacion">
           <span class="badge-grado">Estamento (Grado 1)</span>
           <span class="badge-bioma">${wizardState.biomaFusionado?.nombre || wizardState.biomaBase}</span>
-          <span class="badge-magia ${wizardState.influenciaMagica.toLowerCase()}">${INFLUENCIA_MAGICA[wizardState.influenciaMagica]?.icono} ${wizardState.influenciaMagica}</span>
+          <select class="select-magia-confirmacion ${wizardState.influenciaMagica.toLowerCase()}" 
+                  onchange="cambiarInfluenciaMagica(this.value)">
+            ${Object.keys(INFLUENCIA_MAGICA).map(nivel => `
+              <option value="${nivel}" ${wizardState.influenciaMagica === nivel ? 'selected' : ''}>
+                ${INFLUENCIA_MAGICA[nivel]?.icono} ${nivel}
+              </option>
+            `).join('')}
+          </select>
         </div>
       </div>
       
@@ -1705,6 +1748,13 @@ function renderizarPasoConfirmacion() {
   `;
 }
 
+function cambiarInfluenciaMagica(nuevoNivel) {
+  if (INFLUENCIA_MAGICA[nuevoNivel]) {
+    wizardState.influenciaMagica = nuevoNivel;
+    renderizarPantalla();
+  }
+}
+
 // Función para cambiar abundancia desde confirmación
 function cambiarAbundanciaConfirmacion(recurso, nivel) {
   if (nivel === 'Inexistente') {
@@ -1751,14 +1801,13 @@ function pasoSiguiente() {
     return;
   }
 
-  if (wizardState.paso === 2 && !wizardState.biomaBase && !wizardState.biomaFusionado) {
-    mostrarError('Por favor, determina el bioma de tu territorio');
-    return;
-  }
-
-  if (wizardState.paso === 2 && wizardState.esBiomaEspecial && !wizardState.subBioma) {
-    mostrarError('Debes tirar el d6 para determinar el sub-bioma');
-    return;
+  if (wizardState.paso === 2) {
+    // Require at least 1 biome selected
+    const seleccionados = wizardState.biomasSeleccionados || [];
+    if (seleccionados.length === 0) {
+      mostrarError('Por favor, selecciona al menos un bioma.');
+      return;
+    }
   }
 
   if (wizardState.paso === 5) {
@@ -1947,6 +1996,9 @@ function renderizarHUD(container) {
                 <span class="capacidad-magica ${a.influenciaMagica?.toLowerCase()}" title="Influencia Mágica">
                     ${INFLUENCIA_MAGICA[a.influenciaMagica]?.icono} Magia ${a.influenciaMagica}
                 </span>
+                <span class="separador">•</span>
+                <span class="stat-badge" title="Calidad Total">⭐ ${stats.calidadTotal}</span>
+                <span class="stat-badge" title="Influencia">📜 ${estadoSimulacion?.recursosEspeciales?.influencia || 0}</span>
             </div>
           </div>
         </div>
@@ -1955,6 +2007,12 @@ function renderizarHUD(container) {
           <button class="btn-accion" onclick="mostrarOpciones()">⚙️</button>
         </div>
       </header>
+      
+      ${estadoSimulacion && estadoSimulacion.esHambruna ? `
+        <div class="alerta-hambruna">
+            ☠️ ¡HAMBRUNA! (Sin Alimentos: Calidad -8, Crecimiento 0)
+        </div>
+      ` : ''}
 
       ${renderizarNavegacionHUD()}
       
@@ -1975,36 +2033,60 @@ function cambiarPestana(nombre) {
 
 function renderizarNavegacionHUD() {
   const pestanas = [
-    { id: 'resumen', icono: '📊', label: 'Resumen' },
-    { id: 'produccion', icono: '⚒️', label: 'Producción' },
+    { id: 'militar', icono: '⚔️', label: 'Militar' },
+    { id: 'diplomacia', icono: '🤝', label: 'Diplomacia' },
+    { id: 'devocion', icono: '🙏', label: 'Devoción' },
+    { id: 'poblacion', icono: '👥', label: 'Población' },
+    { id: 'bioma', icono: '🌿', label: 'Bioma' },
+    { id: 'edificios', icono: '🏛️', label: 'Edificios' },
     { id: 'almacenamiento', icono: '📦', label: 'Almacén' },
-    { id: 'comercio', icono: '⚖️', label: 'Comercio' },
-    { id: 'crecimiento', icono: '🌱', label: 'Crecimiento' },
-    { id: 'edificios', icono: '🏛️', label: 'Edificios' }
+    { id: 'comercio', icono: '⚖️', label: 'Comercio' }
   ];
+
+  const turnoActual = estadoSimulacion?.turno || 0;
+  const puedeDeshacer = estadoSimulacion?.historialTurnos?.length > 0;
 
   return `
     <nav class="hud-nav">
+      <div class="hud-turno-display">
+        <span class="turno-label">⏱️ Turno</span>
+        <span class="turno-numero">${turnoActual}</span>
+      </div>
+      <div class="hud-tabs">
         ${pestanas.map(p => `
-            <button class="nav-tab ${pestanaActiva === p.id ? 'activa' : ''}" 
-                    onclick="cambiarPestana('${p.id}')">
-                <span class="tab-icono">${p.icono}</span>
-                <span class="tab-label">${p.label}</span>
-            </button>
+          <button class="nav-tab ${pestanaActiva === p.id ? 'activa' : ''}" 
+                  onclick="cambiarPestana('${p.id}')">
+            <span class="tab-icono">${p.icono}</span>
+            <span class="tab-label">${p.label}</span>
+          </button>
         `).join('')}
+      </div>
+      <div class="hud-turno-controles">
+        <button class="btn-deshacer-turno ${!puedeDeshacer ? 'disabled' : ''}" 
+                onclick="btnDeshacerTurno()" 
+                ${!puedeDeshacer ? 'disabled' : ''}
+                title="Deshacer último turno">
+          ⏪ Deshacer
+        </button>
+        <button class="btn-pasar-turno" onclick="btnPasarTurno()" title="Pasar al siguiente turno">
+          ⏩ Pasar Turno
+        </button>
+      </div>
     </nav>
     `;
 }
 
 function renderizarContenidoPestana(a, stats) {
   switch (pestanaActiva) {
-    case 'resumen': return renderizarPestanaResumen(a, stats);
-    case 'produccion': return renderizarPestanaProduccion(a, stats);
+    case 'militar': return renderizarPestanaMilitar(a, stats);
+    case 'diplomacia': return renderizarPestanaDiplomacia(a, stats);
+    case 'devocion': return renderizarPestanaDevocion(a, stats);
+    case 'poblacion': return renderizarPestanaPoblacion(a, stats);
+    case 'bioma': return renderizarPestanaBioma(a, stats);
+    case 'edificios': return renderizarPestanaEdificios(a, stats);
     case 'almacenamiento': return renderizarPestanaAlmacenamiento(a, stats);
     case 'comercio': return renderizarPestanaComercio(a, stats);
-    case 'crecimiento': return renderizarPestanaCrecimiento(a, stats);
-    case 'edificios': return renderizarPestanaEdificios(a, stats);
-    default: return renderizarPestanaResumen(a, stats);
+    default: return renderizarPestanaBioma(a, stats);
   }
 }
 
@@ -2034,12 +2116,62 @@ function renderizarPestanaResumen(a, stats) {
           </div>
         </div>
         <div class="stat-card">
+          <span class="stat-icono">⚔️</span>
+          <div class="stat-info">
+            <span class="stat-label">Guarnición</span>
+            <span class="stat-value">${stats.grado.guarnicion}</span>
+          </div>
+        </div>
+        <div class="stat-card">
           <span class="stat-icono">📦</span>
           <div class="stat-info">
             <span class="stat-label">Almacén</span>
             <span class="stat-value">${stats.grado.almacenamiento}</span>
           </div>
         </div>
+        
+        <!-- Crecimiento Stat Calculated with Famine Logic -->
+        ${(() => {
+      // Recalculate Logic locally for display
+      const recursos = a.recursos || {};
+      const produccionBioma = calcularProduccionTotal(recursos, stats.calidadTotal);
+      const produccionEdificios = calcularProduccionEdificios(a.edificios || [], stats);
+      const prodAlimento = (produccionBioma["Alimento"]?.medidas || 0) + (produccionEdificios["Alimento"]?.total || 0);
+      const consum = (estadoSimulacion?.poblacion?.length || 0) * 1;
+      const balance = prodAlimento - consum;
+
+      // Base Immigration
+      const gradoData = GRADOS[a.grado];
+      let inmigracion = gradoData.inmigracion + stats.calidadTotal;
+      if (estadoSimulacion?.poblacion) {
+        estadoSimulacion.poblacion.forEach(c => {
+          if (NATURALEZAS_POBLACION[c.naturaleza]) inmigracion += NATURALEZAS_POBLACION[c.naturaleza].bonoInmigracion;
+        });
+      }
+      // Natural Reproduction
+      const plebeyos = estadoSimulacion ? estadoSimulacion.poblacion.filter(c => c.rol === 'Plebeyo').length : 0;
+      let reproduccion = plebeyos;
+      let esDeficit = false;
+
+      if (balance < 0) {
+        reproduccion = 0;
+        esDeficit = true;
+      }
+
+      const total = Math.max(0, inmigracion) + reproduccion;
+
+      return `
+            <div class="stat-card ${esDeficit ? 'alerta-borde' : ''}">
+              <span class="stat-icono">🌱</span>
+              <div class="stat-info">
+                <span class="stat-label">Crecimiento</span>
+                <span class="stat-value ${esDeficit ? 'texto-error' : ''}">
+                    ${esDeficit ? '⚠️' : '+'} ${total}
+                </span>
+                ${esDeficit ? '<span style="font-size:0.6rem; color:#ef4444;">Falta comida</span>' : ''}
+              </div>
+            </div>`;
+    })()}
       </div>
       
       <div class="hud-paneles">
@@ -2206,310 +2338,302 @@ function renderizarListaBonificaciones(bonificaciones) {
   }).join('');
 }
 
-function renderizarPestanaProduccion(a, stats) {
+
+function renderizarPestanaMilitar(a, stats) {
+  return `<div class="panel panel-full"><h3>⚔️ Militar</h3><div class="panel-contenido"><p>En construcción...</p></div></div>`;
+}
+
+function renderizarPestanaDiplomacia(a, stats) {
+  return `<div class="panel panel-full"><h3>🤝 Diplomacia</h3><div class="panel-contenido"><p>En construcción...</p></div></div>`;
+}
+
+function renderizarPestanaDevocion(a, stats) {
+  return `<div class="panel panel-full"><h3>🙏 Devoción</h3><div class="panel-contenido"><p>En construcción...</p></div></div>`;
+}
+
+function renderizarPestanaPoblacion(a, stats) {
+  const tiposPoblacion = ["Neutral", "Positiva", "Negativa", "Monstruo", "Artificial"];
+  const iconosTipo = { Neutral: "⚪", Positiva: "🌟", Negativa: "🌑", Monstruo: "👹", Artificial: "🤖" };
+
+  // Conteo por tipo
+  const counts = { Neutral: 0, Positiva: 0, Negativa: 0, Monstruo: 0, Artificial: 0 };
+  let total = 0;
+
+  if (estadoSimulacion.poblacion) {
+    total = estadoSimulacion.poblacion.length;
+    estadoSimulacion.poblacion.forEach(p => {
+      const k = p.naturaleza || "Neutral";
+      counts[k] = (counts[k] || 0) + 1;
+    });
+  }
+
+  // Cálculos de inmigración
+  const gradoData = GRADOS[a.grado];
+  const baseInmigracion = gradoData.inmigracion;
+  const modCalidad = stats.calidadTotal;
+  let bonoMonstruos = 0;
+
+  if (estadoSimulacion?.poblacion) {
+    estadoSimulacion.poblacion.forEach(c => {
+      const nat = typeof NATURALEZAS_POBLACION !== 'undefined' ? NATURALEZAS_POBLACION[c.naturaleza] : null;
+      if (nat) bonoMonstruos += nat.bonoInmigracion;
+    });
+  }
+
+  const totalInmigracion = Math.max(0, baseInmigracion + modCalidad + bonoMonstruos);
+  const tipoInmigracionActual = estadoSimulacion.tipoInmigracion || "Neutral";
+
+  // Balance alimentos (solo poblaciones que consumen)
   const recursos = a.recursos || {};
-  const modificadores = calcularModificadoresRecursos(a.propiedades);
   const produccionBioma = calcularProduccionTotal(recursos, stats.calidadTotal);
   const produccionEdificios = calcularProduccionEdificios(a.edificios || [], stats);
+  const prodAlimento = (produccionBioma["Alimento"]?.medidas || 0) + (produccionEdificios["Alimento"]?.total || 0);
 
-  // Cálculos de Flujo de Comida
-  const totalCuotas = estadoSimulacion.poblacion ? estadoSimulacion.poblacion.length : 0;
-  const consumoAlimentos = totalCuotas * 1; // 1 Medida por Cuota
-  const produccionAlimentoBioma = produccionBioma["Alimento"]?.medidas || 0;
-  const produccionAlimentoEdificios = produccionEdificios["Alimento"]?.total || 0;
-  const produccionTotalAlimentos = produccionAlimentoBioma + produccionAlimentoEdificios;
-  const balanceAlimentos = produccionTotalAlimentos - consumoAlimentos;
+  // Solo cuentan las poblaciones que consumen alimentos
+  const cuotasQueConsumen = estadoSimulacion.poblacion?.filter(c => {
+    const nat = NATURALEZAS_POBLACION?.[c.naturaleza];
+    return nat?.consumeAlimento !== false;
+  }).length || 0;
+
+  const consumo = cuotasQueConsumen;
+  const balanceAlimentos = prodAlimento - consumo;
+  const puedeReproducir = balanceAlimentos >= 0;
+
+  // Pendientes por tipo
+  const pendientes = estadoSimulacion.inmigracionPendientePorTipo || {};
+  const metaConsolidacion = CONVERSION.CUOTA_POBLACION;
+
+  // Reproducción por tipo (estimación para UI, respetando puedeReproducir de cada naturaleza)
+  const reproduccionPorTipo = {};
+  if (puedeReproducir && estadoSimulacion.poblacion) {
+    estadoSimulacion.poblacion.forEach(c => {
+      if (c.rol === "Plebeyo") {
+        const t = c.naturaleza || "Neutral";
+        const nat = NATURALEZAS_POBLACION?.[t];
+        // Solo reproduce si la naturaleza lo permite
+        if (nat?.puedeReproducir !== false) {
+          reproduccionPorTipo[t] = (reproduccionPorTipo[t] || 0) + 1;
+        }
+      }
+    });
+  }
 
   return `
-    <div class="panel panel-full">
-        <h3>⚒️ Producción Detallada</h3>
+    <div class="panel panel-full" style="margin-bottom:1rem;">
+        <h3>👥 Población del Asentamiento</h3>
         <div class="panel-contenido">
-        
-            <!-- Flujo de Alimentos -->
-            <div class="seccion-produccion seccion-alimentos">
-                <h4>🌾 Flujo de Alimentos</h4>
-                <div class="economia-grid">
-                    <div class="economia-ingresos">
-                        <h5>🥣 Producción</h5>
-                        <div class="economia-item positivo">
-                            <span>Bioma</span>
-                            <span>+${produccionAlimentoBioma}</span>
-                        </div>
-                        <div class="economia-item positivo">
-                            <span>Edificios</span>
-                            <span>+${produccionAlimentoEdificios}</span>
-                        </div>
-                        <div class="economia-item total positivo">
-                            <span><strong>Total</strong></span>
-                            <span><strong>+${produccionTotalAlimentos}</strong></span>
-                        </div>
-                    </div>
-                    <div class="economia-gastos">
-                        <h5>👥 Consumo</h5>
-                        <div class="economia-item negativo">
-                            <span>Población (${totalCuotas})</span>
-                            <span>-${consumoAlimentos}</span>
-                        </div>
-                        <div class="economia-item total negativo">
-                            <span><strong>Total</strong></span>
-                            <span><strong>-${consumoAlimentos}</strong></span>
-                        </div>
-                    </div>
+            
+            <!-- Resumen Total -->
+            <div style="display:flex; align-items:center; gap:20px; margin-bottom:1rem; padding:1rem; background:rgba(255,255,255,0.08); border-radius:8px;">
+                <div style="text-align:center;">
+                    <span style="font-size:2rem; font-weight:bold;">${total}</span>
+                    <br><small>Cuotas Totales</small>
                 </div>
-                <div class="economia-balance ${balanceAlimentos >= 0 ? 'positivo' : 'negativo'}">
-                    <span>⚖️ Balance de Alimentos</span>
-                    <span class="balance-valor">${balanceAlimentos >= 0 ? '+' : ''}${balanceAlimentos}</span>
-                </div>
-            </div>
-
-            <!-- Producción desde Bioma -->
-            <div class="seccion-produccion">
-                <h4>🌍 Recursos del Bioma</h4>
-                <table class="tabla-produccion">
-                    <thead>
-                        <tr>
-                            <th>Recurso</th>
-                            <th>Fuente</th>
-                            <th>Trabajadores</th>
-                            <th>Producción</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${Object.entries(recursos).map(([nombre, data]) => {
-    const prodData = produccionBioma[nombre];
-    const esActiva = prodData && prodData.tipo === 'activa';
-    const almacenado = estadoSimulacion?.almacen?.[nombre] || 0;
-
-    // Mantener visible si tiene valor > 0 o está en recursos
-    if (almacenado === 0 && (!prodData || prodData.medidas === 0)) return '';
-
+                <div style="flex:1; display:flex; flex-wrap:wrap; gap:8px;">
+                    ${tiposPoblacion.map(tipo => {
+    const c = counts[tipo] || 0;
+    if (c === 0) return '';
+    const esDominante = c === Math.max(...Object.values(counts));
     return `
-                            <tr class="${esActiva ? 'fila-activa' : 'fila-pasiva'}">
-                                <td>
-                                    <span class="recurso-icono">${RECURSOS[nombre]?.icono || '📦'}</span>
-                                    <strong>${nombre}</strong>
-                                    <span class="almacen-mini">(${almacenado})</span>
-                                </td>
-                                <td>
-                                    <span class="fuente-badge bioma">🌍 Bioma</span>
-                                </td>
-                                <td>
-                                    <span class="dato-numerico">${prodData?.trabajadores || 0}</span>
-                                </td>
-                                <td>
-                                    <strong class="dato-produccion">${prodData?.medidas || 0}</strong>
-                                </td>
-                            </tr>
+                            <div style="background:${esDominante ? 'rgba(100,200,100,0.2)' : 'rgba(255,255,255,0.05)'}; padding:0.4rem 0.8rem; border-radius:4px; display:flex; align-items:center; gap:6px; ${esDominante ? 'border:1px solid rgba(100,200,100,0.5);' : ''}">
+                                <span>${iconosTipo[tipo]}</span>
+                                <strong>${c}</strong>
+                                <small style="opacity:0.7;">${tipo}</small>
+                                ${esDominante ? '<span title="Dominante" style="font-size:0.7rem;">👑</span>' : ''}
+                            </div>
                         `;
   }).join('')}
-                    </tbody>
-                </table>
+                </div>
             </div>
             
-            <!-- Producción desde Edificios -->
-            ${Object.keys(produccionEdificios).length > 0 ? `
-                <div class="seccion-produccion">
-                    <h4>🏭 Recursos de Edificios</h4>
-                    <table class="tabla-produccion">
-                        <thead>
-                            <tr>
-                                <th>Recurso</th>
-                                <th>Fuente</th>
-                                <th>Cuotas</th>
-                                <th>Producción</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${Object.entries(produccionEdificios).map(([recurso, data]) =>
-    data.fuentes.map(f => {
-      // Verificar Capacidad
-      const estadoEdif = estadoSimulacion.edificiosEstado?.[f.edificio] || { grado: 1 };
-      const capacidad = calcularCapacidadEdificio(f.edificio, estadoEdif.grado);
-      const sobrecarga = f.cuotas > capacidad;
+            <!-- Desglose Individual de Población -->
+            <details style="margin-bottom:1rem;">
+                <summary style="cursor:pointer; padding:0.5rem; background:rgba(255,255,255,0.05); border-radius:4px;">📋 Ver desglose individual (${total} cuotas)</summary>
+                <div style="max-height:200px; overflow-y:auto; margin-top:0.5rem; padding:0.5rem; background:rgba(0,0,0,0.2); border-radius:4px;">
+                    ${estadoSimulacion.poblacion?.map((p, idx) => {
+    const icon = iconosTipo[p.naturaleza] || '⚪';
+    const subtipo = p.naturaleza === 'Artificial' && p.subtipo ? ` (${iconosTipo[p.subtipo] || '⚪'} ${p.subtipo})` : '';
+    return `
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <span>${icon} <strong>#${p.id}</strong> ${p.naturaleza}${subtipo}</span>
+                                <span style="opacity:0.7;">${p.rol} ${p.asignacion ? '🔧 ' + p.asignacion : '⏸️ Ocioso'}</span>
+                            </div>
+                        `;
+  }).join('') || '<p>No hay población.</p>'}
+                </div>
+            </details>
 
-      return `
-                                    <tr class="fila-edificio ${sobrecarga ? 'error-capacidad' : ''}">
-                                        <td>
-                                            <span class="recurso-icono">${RECURSOS[recurso]?.icono || RECURSOS_ESPECIALES[recurso]?.icono || '📦'}</span>
-                                            <strong>${recurso}</strong>
-                                        </td>
-                                        <td>
-                                            <span class="fuente-badge edificio">🏭 ${f.edificio}</span>
-                                        </td>
-                                        <td>
-                                            <span class="dato-numerico ${sobrecarga ? 'texto-error' : ''}">
-                                                ${f.cuotas} / ${capacidad}
-                                                ${sobrecarga ? '⚠️' : ''}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <strong class="dato-produccion">+${f.produccion}</strong>
-                                        </td>
-                                    </tr>
-                                    ${sobrecarga ? `
-                                        <tr class="fila-error">
-                                            <td colspan="4" class="mensaje-error">
-                                                ⚠️ Error: Asignadas ${f.cuotas} cuotas, capacidad máxima ${capacidad}. El exceso no produce.
-                                            </td>
-                                        </tr>
-                                    ` : ''}
-                                `;
-    }).join('')
-  ).join('')}
-                        </tbody>
-                </table>
+            <!-- Selector de Tipo de Inmigración -->
+            <div style="margin-bottom:1rem; padding:1rem; background:rgba(0,100,200,0.1); border-radius:8px; border-left:3px solid #4a9eff;">
+                <label style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                    <span>🌍 Tipo de Inmigración:</span>
+                    <select onchange="cambiarTipoInmigracion(this.value)" style="padding:0.4rem; border-radius:4px; background:#333; color:#fff; border:1px solid #555;">
+                        ${tiposPoblacion.map(t => `
+                            <option value="${t}" ${tipoInmigracionActual === t ? 'selected' : ''}>${iconosTipo[t]} ${t}</option>
+                        `).join('')}
+                    </select>
+                    <small style="opacity:0.7;">(+${totalInmigracion} medidas/turno)</small>
+                </label>
+                
+                ${tipoInmigracionActual === 'Artificial' ? `
+                    <div style="margin-top:0.8rem; padding-top:0.8rem; border-top:1px solid rgba(255,255,255,0.1);">
+                        <label style="display:flex; align-items:center; gap:10px;">
+                            <span>🤖 Subtipo Artificial:</span>
+                            <select onchange="cambiarSubtipoArtificial(this.value)" style="padding:0.4rem; border-radius:4px; background:#333; color:#fff; border:1px solid #555;">
+                                ${["Neutral", "Positiva", "Negativa", "Monstruo"].map(s => `
+                                    <option value="${s}" ${(estadoSimulacion.subtipoInmigracionArtificial || 'Neutral') === s ? 'selected' : ''}>${iconosTipo[s]} ${s}</option>
+                                `).join('')}
+                            </select>
+                            <small style="opacity:0.7;">(define el subtipo de nuevas cuotas Artificiales)</small>
+                        </label>
+                        <p style="margin:0.5rem 0 0 0; font-size:0.85rem; opacity:0.7;">
+                            ℹ️ Los Artificiales no comen, no crecen, cuestan 1 Doblón/turno y pueden tener un subtipo base.
+                        </p>
+                    </div>
+                ` : ''}
+            </div>
+
+            ${!puedeReproducir ? `
+                <div style="padding:0.8rem; background:rgba(255,0,0,0.15); border-radius:6px; margin-bottom:1rem; border-left:3px solid #ff4444;">
+                    ⚠️ <strong>Hambruna:</strong> El crecimiento natural está detenido por falta de alimentos.
                 </div>
             ` : ''}
-            
-            <!-- Economía de Doblones -->
-            <div class="seccion-produccion seccion-doblones">
-                <h4>💰 Economía de Doblones</h4>
-                <div class="economia-grid">
-                    <div class="economia-ingresos">
-                        <h5>📈 Ingresos</h5>
-                        <div class="economia-item positivo">
-                            <span>Tributos</span>
-                            <span>+${(TRIBUTOS[a.tributo]?.doblones || 0) * (estadoSimulacion?.poblacion?.length || 0)}</span>
-                        </div>
-                        ${stats.ingresosDoblones > 0 ? `
-                            <div class="economia-item positivo">
-                                <span>Edificios</span>
-                                <span>+${stats.ingresosDoblones}</span>
+
+            <!-- Barras de Progreso por Tipo -->
+            <h4 style="margin-top:1rem; margin-bottom:0.5rem;">📈 Progreso de Crecimiento por Tipo</h4>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                ${tiposPoblacion.map(tipo => {
+    const pendiente = pendientes[tipo] || 0;
+    const reprod = reproduccionPorTipo[tipo] || 0;
+    const inmig = tipoInmigracionActual === tipo ? totalInmigracion : 0;
+    const crecimientoTurno = reprod + inmig;
+    const porcentaje = Math.min(100, (pendiente / metaConsolidacion) * 100);
+    const activo = counts[tipo] > 0 || pendiente > 0 || inmig > 0;
+
+    if (!activo) return '';
+
+    return `
+                        <div style="background:rgba(255,255,255,0.05); padding:0.8rem; border-radius:6px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem;">
+                                <span>${iconosTipo[tipo]} <strong>${tipo}</strong> <small style="opacity:0.6;">(${counts[tipo]} cuotas)</small></span>
+                                <span style="font-size:0.85rem;">
+                                    ${reprod > 0 ? `<span style="color:#8f8;">+${reprod} reprod</span>` : ''}
+                                    ${inmig > 0 ? `<span style="color:#88f;">+${inmig} inmig</span>` : ''}
+                                </span>
                             </div>
-                        ` : ''}
-                        <div class="economia-item total positivo">
-                            <span><strong>Total Ingresos</strong></span>
-                            <span><strong>+${((TRIBUTOS[a.tributo]?.doblones || 0) * (estadoSimulacion?.poblacion?.length || 0)) + stats.ingresosDoblones}</strong></span>
+                            <div class="barra-progreso-container" style="margin:0;">
+                                <div class="barra-track" style="height:12px;">
+                                    <div class="barra-fill" style="width:${porcentaje}%; background:${porcentaje >= 100 ? '#4f4' : '#4a9eff'};"></div>
+                                </div>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; font-size:0.8rem; opacity:0.7; margin-top:0.2rem;">
+                                <span>${pendiente} / ${metaConsolidacion}</span>
+                                ${pendiente >= metaConsolidacion ? '<span style="color:#4f4;">✨ ¡Nueva cuota lista!</span>' : ''}
+                            </div>
                         </div>
-                    </div>
-                    <div class="economia-gastos">
-                        <h5>📉 Gastos</h5>
-                        <div class="economia-item negativo">
-                            <span>Mantenimiento Edificios</span>
-                            <span>-${stats.mantenimientoEdificios || 0}</span>
-                        </div>
-                        <div class="economia-item total negativo">
-                            <span><strong>Total Gastos</strong></span>
-                            <span><strong>-${stats.mantenimientoEdificios || 0}</strong></span>
-                        </div>
-                    </div>
-                </div>
-                <div class="economia-balance ${(((TRIBUTOS[a.tributo]?.doblones || 0) * (estadoSimulacion?.poblacion?.length || 0)) + stats.ingresosDoblones - (stats.mantenimientoEdificios || 0)) >= 0 ? 'positivo' : 'negativo'}">
-                    <span>⚖️ Balance Neto por Turno</span>
-                    <span class="balance-valor">${(((TRIBUTOS[a.tributo]?.doblones || 0) * (estadoSimulacion?.poblacion?.length || 0)) + stats.ingresosDoblones - (stats.mantenimientoEdificios || 0)) >= 0 ? '+' : ''}${((TRIBUTOS[a.tributo]?.doblones || 0) * (estadoSimulacion?.poblacion?.length || 0)) + stats.ingresosDoblones - (stats.mantenimientoEdificios || 0)}</span>
-                </div>
+                    `;
+  }).join('')}
             </div>
 
-            <div class="produccion-footer">
-                <div class="alerta-produccion info">
-                ℹ️ <strong>Nota:</strong> Los recursos del Bioma requieren trabajadores. Los edificios requieren cuotas asignadas.
-                </div>
-            </div>
         </div>
     </div>
   `;
 }
 
 
-function renderizarPestanaCrecimiento(a, stats) {
-  // Calcular datos de crecimiento
-  const gradoData = GRADOS[a.grado];
-  const baseInmigracion = gradoData.inmigracion;
-  const modCalidad = stats.calidadTotal;
+function renderizarPestanaBioma(a, stats) {
+  const recursos = a.recursos || {};
+  const produccionBioma = calcularProduccionTotal(recursos, stats.calidadTotal);
+  const produccionEdificios = calcularProduccionEdificios(a.edificios || [], stats);
 
-  // Calcular bonos de monstruos
-  let bonoMonstruos = 0;
-  if (estadoSimulacion && estadoSimulacion.poblacion) {
-    estadoSimulacion.poblacion.forEach(c => {
-      const nat = NATURALEZAS_POBLACION[c.naturaleza];
-      if (nat) bonoMonstruos += nat.bonoInmigracion;
-    });
-  }
+  // Biome Info
+  const biomaDef = a.biomaFusionado || BIOMAS_BASE[a.biomaBase] || {};
+  const nombreBioma = biomaDef.nombre || a.biomaBase;
+  const descripcion = biomaDef.descripcion || '';
+  const peculiaridad = a.peculiaridad || 'Ninguna';
+  const pecData = PECULIARIDADES && PECULIARIDADES[peculiaridad];
 
-  const totalInmigracion = Math.max(0, baseInmigracion + modCalidad + bonoMonstruos);
+  const bonusesHTML = Object.entries(stats.bonificaciones || {}).map(([k, v]) => {
+    if (v === 0) return '';
+    return `<li>${k}: <strong>${v > 0 ? '+' : ''}${v}</strong></li>`;
+  }).join('');
 
-  // Crecimiento natural
-  const cuotasPlebeyos = estadoSimulacion ? estadoSimulacion.poblacion.filter(c => c.rol === 'Plebeyo').length : 0;
-  const totalNacimientos = cuotasPlebeyos; // 1 por cuota
-
-  // Consolidación
-  const pendiente = estadoSimulacion ? estadoSimulacion.inmigracionPendiente : 0;
-  const metaConsolidacion = CONVERSION.CUOTA_POBLACION; // 20
-  const porcentajeConsolidacion = Math.min(100, (pendiente / metaConsolidacion) * 100);
+  // Tables Logic (Simplified Reuse)
+  // ... Copied mostly from original PestanaProduccion ...
+  const totalCuotas = estadoSimulacion.poblacion ? estadoSimulacion.poblacion.length : 0;
+  const consumoAlimentos = totalCuotas;
+  const pBioma = produccionBioma["Alimento"]?.medidas || 0;
+  const pEdif = produccionEdificios["Alimento"]?.total || 0;
+  const bal = (pBioma + pEdif) - consumoAlimentos;
 
   return `
-  < div class="grid-crecimiento" >
-        <div class="panel panel-crecimiento">
-            <h3>🌍 Inmigración (Externa)</h3>
-            <div class="panel-contenido">
-                <div class="desglose-lista">
-                    <div class="desglose-item">
-                        <span>Base del Grado (${a.grado})</span>
-                        <span>${formatearValor(baseInmigracion)}</span>
-                    </div>
-                    <div class="desglose-item">
-                        <span>Calidad del Asentamiento</span>
-                        <span class="${obtenerClaseColor('Calidad', modCalidad)}">${formatearValor(modCalidad)}</span>
-                    </div>
-                    ${bonoMonstruos !== 0 ? `
-                    <div class="desglose-item">
-                        <span>Bono Naturaleza/Monstruos</span>
-                        <span class="positivo">+${bonoMonstruos}</span>
-                    </div>
-                    ` : ''}
-                    <div class="desglose-total">
-                        <span>Total Inmigración</span>
-                        <strong>+${totalInmigracion} medidas/turno</strong>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <div class="panel panel-full">
+         <h3>🌿 Bioma: ${nombreBioma}</h3>
+         <div class="bioma-info" style="margin-bottom:1rem; padding:1rem; background:rgba(255,255,255,0.05); border-radius:6px;">
+             ${pecData ? `<p><strong>Peculiaridad:</strong> ${peculiaridad} ${pecData.icono}</p>` : `<p><strong>Peculiaridad:</strong> ${peculiaridad}</p>`}
+             <p>${descripcion}</p>
+             ${Object.keys(stats.bonificaciones).length > 0 ?
+      `<div style="margin-top:0.5rem; background:rgba(0,0,0,0.2); padding:0.5rem; border-radius:4px;">
+                  <strong>Bonificadores Totales:</strong>
+                  <ul style="padding-left:1.2rem; margin:0.5rem 0; font-size:0.9rem;">${bonusesHTML}</ul>
+                </div>` : ''}
+         </div>
+         
+         <hr class="separador-seccion">
 
-        <div class="panel panel-crecimiento">
-            <h3>👶 Crecimiento Natural (Interno)</h3>
-            <div class="panel-contenido">
-                <div class="desglose-lista">
-                    <div class="desglose-item">
-                        <span>Cuotas de Plebeyos Activas</span>
-                        <span>${cuotasPlebeyos}</span>
-                    </div>
-                    <div class="desglose-item">
-                        <span>Tasa de Natalidad</span>
-                        <span>x1</span>
-                    </div>
-                    <div class="desglose-total">
-                        <span>Total Nacimientos</span>
-                        <strong>+${totalNacimientos} medidas/turno</strong>
-                    </div>
-                </div>
-            </div>
-        </div>
+         <h3>⚒️ Explotación de Recursos</h3>
+         <div class="panel-contenido">
+            
+             <!-- Tabla Recursos Bioma -->
+             <div class="seccion-produccion">
+                <h4>🌍 Recursos Naturales</h4>
+                ${Object.keys(recursos).length === 0 ? '<p style="opacity:0.7;">No hay recursos definidos en este bioma.</p>' : `
+                <table class="tabla-produccion">
+                    <thead><tr><th>Recurso</th><th>Abundancia</th><th>Trabajadores</th><th>Producción</th></tr></thead>
+                    <tbody>
+                        ${Object.entries(recursos).map(([nombre, data]) => {
+        const prodData = produccionBioma[nombre];
+        const esActiva = prodData && prodData.tipo === 'activa';
+        const almacenado = estadoSimulacion?.almacen?.[nombre] || 0;
+        const asignados = (estadoSimulacion.poblacion || []).filter(p => p.asignacion === nombre).length;
+        const abundancia = data.abundancia || 'Normal';
+        const claseAbundancia = abundancia === 'Abundante' ? 'positivo' : (abundancia === 'Escaso' ? 'negativo' : '');
 
-        <div class="panel panel-full panel-consolidacion">
-            <h3>📈 Consolidación de Población</h3>
-            <div class="panel-contenido">
-                <p class="descripcion-consolidacion">Las medidas de población (inmigrantes + nacimientos) se acumulan hasta formar una nueva Cuota completa.</p>
-                
-                <div class="barra-progreso-container">
-                    <div class="barra-info">
-                        <span>Progreso Actual</span>
-                        <span><strong>${pendiente}</strong> / ${metaConsolidacion} medidas</span>
-                    </div>
-                    <div class="barra-track">
-                        <div class="barra-fill" style="width: ${porcentajeConsolidacion}%"></div>
-                    </div>
-                </div>
-                
-                ${pendiente >= metaConsolidacion ? `
-                    <div class="alerta-consolidacion positivo">
-                        ✨ ¡Nueva Cuota lista para formarse el próximo turno!
-                    </div>
-                ` : ''}
-            </div>
-        </div>
-    </div >
+        return `<tr class="${esActiva ? 'fila-activa' : 'fila-pasiva'}">
+                                <td>
+                                    <span class="recurso-icono">${RECURSOS[nombre]?.icono || '📦'}</span> 
+                                    <strong>${nombre}</strong> 
+                                    <small>(${almacenado} en almacén)</small>
+                                </td>
+                                <td class="${claseAbundancia}">${abundancia}</td>
+                                <td>
+                                    <div class="asignacion-control">
+                                        <span>${asignados}</span>
+                                        <div class="btn-group-sm">
+                                            <button onclick="event.stopPropagation(); asignarPoblacionRecurso('${nombre}', -1)" ${asignados <= 0 ? 'disabled' : ''}>-</button>
+                                            <button onclick="event.stopPropagation(); asignarPoblacionRecurso('${nombre}', 1)">+</button>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><strong>${prodData?.medidas || 0}</strong> ${asignados > 0 ? '(activa)' : '(pasiva)'}</td>
+                            </tr>`;
+      }).join('')}
+                    </tbody>
+                </table>
+                `}
+             </div>
+             
+             <!-- Alimentos Simple Summary -->
+             <div class="seccion-produccion" style="margin-top:1rem;">
+                <h4>🌾 Balance Alimentos</h4>
+                <p>Prod: +${pBioma + pEdif} | Consumo: -${consumoAlimentos} | <strong>Neto: ${bal > 0 ? '+' : ''}${bal}</strong></p>
+             </div>
+             
+         </div>
+    </div>
   `;
 }
+
 
 // Helper para modificar cantidad directamente desde la tabla
 function modificarCantidadRecurso(recurso, delta) {
@@ -2976,8 +3100,131 @@ function consumeCostBlock(costBlock, multiplier = 10) {
 // PESTAÑA DE EDIFICIOS
 // =====================================================
 
+
+function controlarPoblacionConstruccion(id, delta) {
+  if (typeof asignarPoblacionConstruccion === 'function') {
+    const constr = estadoSimulacion.construccionesEnProgreso.find(c => c.id === id);
+    if (constr) {
+      const current = constr.poblacionAsignada || 0;
+      const newValue = Math.max(0, current + delta);
+      // Optional: Check idle before adding?
+      // For now allowing override, logic will be handled
+      asignarPoblacionConstruccion(id, newValue);
+      actualizarHUD();
+    }
+  } else {
+    console.error('asignarPoblacionConstruccion no está definida');
+  }
+}
+
+// === HELPERS DE ASIGNACIÓN (NUEVO SISTEMA) ===
+
+function asignarPoblacionRecurso(recurso, delta) {
+  if (!estadoSimulacion.poblacion) return;
+
+  if (delta > 0) {
+    // Assign: Find one unassigned
+    const p = estadoSimulacion.poblacion.find(x => !x.asignacion);
+    if (p) {
+      p.asignacion = recurso;
+      actualizarHUD();
+    } else {
+      console.log("No hay población ociosa");
+      mostrarNotificacion("No hay población ociosa", "error");
+    }
+  } else {
+    // Unassign: Find one assigned to this resource
+    const p = estadoSimulacion.poblacion.find(x => x.asignacion === recurso);
+    if (p) {
+      p.asignacion = null;
+      actualizarHUD();
+    }
+  }
+}
+
+function asignarPoblacionEdificio(edificioId, delta, rolRequerido) {
+  if (!estadoSimulacion.poblacion) return;
+
+  let token = `edificio_id:${edificioId}`;
+  if (edificioId.includes('_legacy_')) {
+    const name = edificioId.split('_legacy_')[0];
+    token = `edificio:${name}`;
+  }
+
+  if (delta > 0) {
+    // Find idle worker matching role
+    const p = estadoSimulacion.poblacion.find(x =>
+      !x.asignacion &&
+      (!rolRequerido || rolRequerido === 'Cualquiera' || x.rol === rolRequerido)
+    );
+    if (p) {
+      p.asignacion = token;
+      actualizarHUD();
+    } else {
+      mostrarNotificacion("No hay población ociosa (o con rol adecuado)", "error");
+    }
+  } else {
+    // Find worker assigned to this token
+    const p = estadoSimulacion.poblacion.find(x => x.asignacion === token);
+    if (p) {
+      p.asignacion = null;
+      actualizarHUD();
+    }
+  }
+}
+
+// Cambiar tipo de inmigración del asentamiento
+function cambiarTipoInmigracion(tipo) {
+  if (!estadoSimulacion) return;
+  estadoSimulacion.tipoInmigracion = tipo;
+  actualizarHUD();
+}
+
+// Cambiar subtipo para inmigración de Artificiales
+function cambiarSubtipoArtificial(subtipo) {
+  if (!estadoSimulacion) return;
+  estadoSimulacion.subtipoInmigracionArtificial = subtipo;
+  actualizarHUD();
+}
+
 function renderizarPestanaEdificios(a, stats) {
   const gradoActual = GRADOS[a.grado]?.nivel || 1;
+
+  // === SECCIÓN 0: CONSTRUCCIONES EN PROGRESO ===
+  let htmlProgreso = '';
+  if (estadoSimulacion.construccionesEnProgreso && estadoSimulacion.construccionesEnProgreso.length > 0) {
+    htmlProgreso += `<div class="seccion-progreso"><h3>🚧 Construcciones en Progreso</h3><div class="edificios-grid">`;
+    estadoSimulacion.construccionesEnProgreso.forEach(c => {
+      const edificio = EDIFICIOS[c.nombre];
+      const esMejora = c.esMejora;
+      const nombreDisplay = esMejora ? `Mejorando: ${c.nombre}` : `Construyendo: ${c.nombre}`;
+
+      htmlProgreso += `
+          <div class="edificio-card en-progreso">
+             <div class="edificio-header">
+                 <span class="icono">${edificio?.icono || '🔨'}</span>
+                 <span class="nombre">${nombreDisplay}</span>
+             </div>
+             <div class="edificio-body">
+                 <div class="barra-progreso-container">
+                    <p class="progreso-texto">Puntos restantes: ${Math.max(0, c.turnosRestantes)} / ${c.turnosTotales}</p>
+                 </div>
+                 <div class="asignacion-poblacion">
+                    <span class="label-trabajadores">👷 Trabajadores: ${c.poblacionAsignada}</span>
+                    <div class="botones-asignacion">
+                        <button onclick="controlarPoblacionConstruccion('${c.id}', -1)" class="btn-mini" ${c.poblacionAsignada <= 0 ? 'disabled' : ''}>-</button>
+                        <button onclick="controlarPoblacionConstruccion('${c.id}', 1)" class="btn-mini">+</button>
+                    </div>
+                 </div>
+                 <small style="color:#aaa; font-style:italic; display:block; margin-top:5px; font-size: 0.75rem;">
+                    Cada trabajador avanza 1 punto por turno.
+                 </small>
+             </div>
+          </div>
+         `;
+    });
+    htmlProgreso += `</div></div><hr class="separador-seccion">`;
+  }
 
   // === SECCIÓN 1: EDIFICIOS CONSTRUIDOS (INSTANCIAS) ===
   // Migración On-the-fly de strings a objetos (legacy support)
@@ -2986,13 +3233,41 @@ function renderizarPestanaEdificios(a, stats) {
     return e;
   });
 
-  let htmlConstruidos = '';
+  let htmlConstruidos = htmlProgreso; // Start with progress section
+
   if (edificiosInstancias.length > 0) {
     htmlConstruidos += `<div class="seccion-construidos"><h3>🏗️ Edificios Activos</h3><div class="edificios-grid">`;
 
     edificiosInstancias.forEach(instancia => {
       const edificio = EDIFICIOS[instancia.nombre];
       if (!edificio) return;
+
+      // Control de Trabajadores
+      let htmlTrabajadores = '';
+      if (edificio.capacidad) {
+        let token = `edificio_id:${instancia.id}`;
+        if (instancia.id.includes('_legacy_')) token = `edificio:${instancia.nombre}`;
+
+        const count = (estadoSimulacion.poblacion || []).filter(p => p.asignacion === token).length;
+
+        let max = (edificio.capacidad.base || 0);
+        if (edificio.capacidad.porGrado) {
+          max += ((instancia.grado || 1) - 1) * edificio.capacidad.porGrado;
+        }
+        const rol = edificio.capacidad.rol || 'Cualquiera';
+
+        htmlTrabajadores = `
+            <div class="asignacion-poblacion" style="margin-top:0.5rem; padding: 0.5rem; background:rgba(0,0,0,0.2); border-radius:4px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span class="label-trabajadores" title="Rol: ${rol}" style="font-size:0.9rem;">👷 ${count} / ${max}</span>
+                    <div class="botones-asignacion btn-group-sm">
+                        <button onclick="event.stopPropagation(); asignarPoblacionEdificio('${instancia.id}', -1, '${rol}')" class="btn-mini" ${count <= 0 ? 'disabled' : ''}>-</button>
+                        <button onclick="event.stopPropagation(); asignarPoblacionEdificio('${instancia.id}', 1, '${rol}')" class="btn-mini" ${count >= max ? 'disabled' : ''}>+</button>
+                    </div>
+                </div>
+            </div>
+          `;
+      }
 
       // Receta Selector
       let htmlReceta = '';
@@ -3051,6 +3326,7 @@ function renderizarPestanaEdificios(a, stats) {
                     ${htmlMant}
                     <div class="edificio-body">
                         ${edificio.descripcion}
+                        ${htmlTrabajadores}
                         ${htmlReceta}
                         ${(instancia.grado || 1) < (edificio.maxGrado || 1) && edificio.costesMejora ?
           `<div class="accion-mejora" style="margin-top:0.5rem; border-top:1px dashed #555; padding-top:0.5rem;">
@@ -3359,29 +3635,18 @@ function confirmarConstruccion() {
     consumeCostBlock(opcionElegida, MULTIPLICADOR);
   }
 
-  // Add building instance
-  const newId = `${popupConstruccionActivo}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-  const nuevaInstancia = {
-    id: newId,
-    nombre: popupConstruccionActivo,
-    grado: 1,
-    receta: null
-  };
-
-  if (!estadoApp.asentamiento.edificios) {
-    estadoApp.asentamiento.edificios = [];
+  // Iniciar Construcción (simulada)
+  const turnos = edificio.turnos || 1;
+  if (typeof iniciarConstruccion === 'function') {
+    iniciarConstruccion(popupConstruccionActivo, opcionElegida, turnos, false, null);
+  } else {
+    console.error('iniciarConstruccion no está definida');
   }
-  estadoApp.asentamiento.edificios.push(nuevaInstancia);
-
-  // Initialize building state in simulation
-  if (!estadoSimulacion.edificiosEstado) {
-    estadoSimulacion.edificiosEstado = {};
-  }
-  estadoSimulacion.edificiosEstado[newId] = { grado: 1, activo: true };
 
   cerrarPopupConstruccion();
   actualizarHUD();
-  console.log(`✅ Edificio construido: ${popupConstruccionActivo}`);
+  console.log(`🏗️ Construcción iniciada: ${popupConstruccionActivo}`);
+  mostrarNotificacion(`🏗️ Construcción iniciada: ${popupConstruccionActivo}`);
 }
 
 function renderizarListaCuotasPoblacion() {
@@ -3631,7 +3896,34 @@ function cambiarReceta(instanceId, nuevaReceta) {
 let popupMejoraActivo = null;
 
 function mostrarPopupMejora(instanciaId) {
-  const instancia = (estadoApp.asentamiento.edificios || []).find(e => (typeof e !== 'string' && e.id === instanciaId));
+  let instancia = (estadoApp.asentamiento.edificios || []).find(e => (typeof e !== 'string' && e.id === instanciaId));
+
+  // Handle Legacy Strings Conversion
+  if (!instancia && instanciaId.includes('_legacy_')) {
+    const parts = instanciaId.split('_legacy_');
+    const name = parts[0];
+    const idx = parseInt(parts[1]);
+
+    if (estadoApp.asentamiento.edificios && estadoApp.asentamiento.edificios[idx] === name) {
+      // Convert to object in place
+      instancia = {
+        id: `${name}_${Date.now()}_converted`,
+        nombre: name,
+        grado: 1,
+        receta: null
+      };
+      estadoApp.asentamiento.edificios[idx] = instancia;
+
+      // Initialize state
+      if (!estadoSimulacion.edificiosEstado) estadoSimulacion.edificiosEstado = {};
+      estadoSimulacion.edificiosEstado[instancia.id] = { grado: 1, activo: true };
+
+      guardarExpedicion();
+      // We don't re-render immediately to avoid disrupting the flow, 
+      // but next render will show the object correctly.
+    }
+  }
+
   if (!instancia) {
     console.error('Instancia no encontrada:', instanciaId);
     return;
@@ -3640,7 +3932,7 @@ function mostrarPopupMejora(instanciaId) {
   const edificio = EDIFICIOS[instancia.nombre];
   if (!edificio) return;
 
-  popupMejoraActivo = instanciaId;
+  popupMejoraActivo = instancia.id;
   const costesMejora = edificio.costesMejora || [];
   const MULTIPLICADOR = 10;
 
@@ -3760,13 +4052,13 @@ function confirmarMejora() {
     consumeCostBlock(opcionElegida, MULTIPLICADOR);
   }
 
-  instancia.grado = (instancia.grado || 1) + 1;
-
-  if (estadoSimulacion.edificiosEstado && estadoSimulacion.edificiosEstado[instancia.id]) {
-    estadoSimulacion.edificiosEstado[instancia.id].grado = instancia.grado;
+  // Iniciar Mejora (simulada)
+  const turnos = edificio.turnos || 1;
+  if (typeof iniciarConstruccion === 'function') {
+    iniciarConstruccion(instancia.nombre, opcionElegida, turnos, true, popupMejoraActivo);
   }
 
   cerrarPopupMejora();
   actualizarHUD();
-  mostrarNotificacion(`✅ ${instancia.nombre} mejorado a Grado ${instancia.grado}`);
+  mostrarNotificacion(`🏗️ Mejora iniciada para ${instancia.nombre}`);
 }

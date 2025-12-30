@@ -38,28 +38,40 @@ const MULTIPLICADORES_ABUNDANCIA = {
 // =====================================================
 const NATURALEZAS_POBLACION = {
     "Neutral": {
-        icono: "👤",
+        icono: "⚪",
         ejemplos: "Humanos, Elfos, Medianos",
         modCalidad: 0,
         bonoInmigracion: 0,
         compatibilidad: "Universal",
-        descripcion: "Adaptabilidad estándar"
+        descripcion: "Adaptabilidad estándar",
+        consumeAlimento: true,
+        puedeReproducir: true,
+        puedeSerAcademico: true,
+        puedeDevocion: true
     },
     "Positiva": {
-        icono: "😇",
+        icono: "🌟",
         ejemplos: "Aasimares, Seres Celestiales",
         modCalidad: 2,
         bonoInmigracion: 0,
         compatibilidad: "Solo Positivas/Neutras",
-        descripcion: "Aumentan la paz social"
+        descripcion: "Aumentan la paz social",
+        consumeAlimento: true,
+        puedeReproducir: true,
+        puedeSerAcademico: true,
+        puedeDevocion: true
     },
     "Negativa": {
-        icono: "😈",
+        icono: "🌑",
         ejemplos: "Orcos, Drows, Tieflings",
         modCalidad: -2,
         bonoInmigracion: 0,
         compatibilidad: "Solo Negativas/Neutras",
-        descripcion: "Alta resistencia física"
+        descripcion: "Alta resistencia física",
+        consumeAlimento: true,
+        puedeReproducir: true,
+        puedeSerAcademico: true,
+        puedeDevocion: true
     },
     "Monstruo": {
         icono: "👹",
@@ -67,7 +79,25 @@ const NATURALEZAS_POBLACION = {
         modCalidad: -1,
         bonoInmigracion: 5,
         compatibilidad: "Específicas de especie",
-        descripcion: "Mayor tasa de reproducción"
+        descripcion: "Mayor tasa de reproducción",
+        consumeAlimento: true,
+        puedeReproducir: true,
+        puedeSerAcademico: true,
+        puedeDevocion: true
+    },
+    "Artificial": {
+        icono: "🤖",
+        ejemplos: "Autómatas, No-Muertos, Constructos, Demonios invocados",
+        modCalidad: 0,
+        bonoInmigracion: 0,
+        compatibilidad: "No aplica",
+        descripcion: "Seres no natos. No comen, no crecen, cuestan Doblones.",
+        consumeAlimento: false,      // No consumen alimentos
+        puedeReproducir: false,      // No tienen crecimiento poblacional
+        puedeSerAcademico: false,    // No pueden ser Académicos
+        puedeDevocion: false,        // No siguen Devociones
+        mantenimientoDoblones: 1,    // Consume 1 Doblón por cuota
+        tieneSubtipo: true           // Puede tener subtipo (Neutral, Positiva, Negativa, Monstruo)
     }
 };
 
@@ -169,7 +199,7 @@ const BIOMAS_BASE = {
         // Exóticos d4: Bosque/Humedal comparten tabla
         exoticos: ["Pieles Exóticas", "Guano", "Textiles Mágicos", "Especias Exóticas"],
         dadoExotico: "d4",
-        propiedadesBase: ["Agua abundante", "Hierba Alta"],
+        propiedadesBase: ["Tierra Fértil", "Paraíso Animal", "Agua abundante", "Terrazas Obstruidas"],
         influenciaMagica: "Baja",
         descripcion: "Pantanos y marismas"
     },
@@ -191,7 +221,7 @@ const BIOMAS_BASE = {
         // Exóticos d4: Árido
         exoticos: ["Metales", "Cristales Mágicos", "Textiles Mágicos", "Reliquias"],
         dadoExotico: "d4",
-        propiedadesBase: ["Desolado", "Caminos Claros"],
+        propiedadesBase: ["Paraíso Animal", "Sofocante", "Hierba Alta", "Caminos Claros"],
         influenciaMagica: "Baja",
         descripcion: "Tierras secas con escasa vegetación"
     },
@@ -211,7 +241,7 @@ const BIOMAS_BASE = {
         // Exóticos d6: Desértico tiene 6 opciones
         exoticos: ["Joyas", "Cristales Mágicos", "Metales Preciosos", "Reliquias", "Textiles Mágicos", "Fuente de Energía"],
         dadoExotico: "d6",
-        propiedadesBase: ["Sofocante", "Desolado"],
+        propiedadesBase: ["Sofocante", "Desolado", "Terrazas Obstruidas", "Caminos Claros"],
         influenciaMagica: "Baja",
         descripcion: "Desiertos inhóspitos"
     },
@@ -235,7 +265,7 @@ const BIOMAS_BASE = {
         // Exóticos d4: Tundra
         exoticos: ["Guano", "Hielo Eterno", "Maderas Preciosas", "Metales"],
         dadoExotico: "d4",
-        propiedadesBase: ["Helado", "Paraíso Animal"],
+        propiedadesBase: ["Helado", "Tierra Fértil", "Terrazas Obstruidas", "Agua abundante", "Paraíso Animal"],
         influenciaMagica: "Baja",
         descripcion: "Llanuras frías con permafrost"
     },
@@ -257,7 +287,7 @@ const BIOMAS_BASE = {
         // Exóticos d4: Parajes Helados
         exoticos: ["Guano", "Metales Preciosos", "Pesca Exótica", "Reliquias"],
         dadoExotico: "d4",
-        propiedadesBase: ["Helado", "Intransitable"],
+        propiedadesBase: ["Helado", "Infértil", "Desolado", "Terrazas Obstruidas", "Caminos Claros"],
         influenciaMagica: "Baja",
         descripcion: "Territorios congelados"
     }
@@ -270,7 +300,7 @@ const BIOMAS_ESPECIALES = {
     "Montañoso": {
         idRango: [7], // d12 = 7
         icono: "⛰️",
-        propiedadesCapa: ["Intransitable", "Terrazas Obstruidas"],
+        propiedadesCapa: ["Intransitable"],
         recursosGarantizados: ["Metales", "Joyas", "Roca", "Carbón"],
         exoticosGarantizados: ["Fuente de Energía Natural"],
         peculiaridadFija: "Terreno Inestable",
@@ -683,10 +713,10 @@ const RECURSOS = {
 // =====================================================
 const EDIFICIOS_INICIALES = [
     "Cultivo Agrícola",
-    "Zona Residencial (1)",
+    "Zona Residencial",
     "Cuartel",
-    "Almacén (1)",
-    "Manufactura (1)",
+    "Almacén",
+    "Manufactura",
     "Archivo",
     "Mercado",
     "Ala Festiva"
@@ -709,13 +739,13 @@ const EDIFICIOS = {
     "Oficina Coordinación": {
         tipo: "Admin", icono: "📋", maxGrado: 3,
         costesG1: [
-            { "Madera": 8, "Papiro": 2 },
+            { "Cualquier Madera": 8, "Papiro": 2 },
             { "Metal": 3, "Papiro": 2 },
             { "Roca": 4, "Papiro": 2 },
             { "Doblones": 25 }
         ],
         costesMejora: [
-            { "Madera": 3, "Papiro": 1 },
+            { "Cualquier Madera": 3, "Papiro": 1 },
             { "Metal": 2, "Papiro": 1 },
             { "Roca": 3, "Papiro": 1 },
             { "Doblones": 12 }
@@ -727,7 +757,7 @@ const EDIFICIOS = {
     "Alcaldía": {
         tipo: "Admin", icono: "🏛️", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 6 },
+            { "Cualquier Madera": 6 },
             { "Marfil": 2, "Piel": 3 },
             { "Roca": 5 },
             { "Metal": 4 },
@@ -740,7 +770,7 @@ const EDIFICIOS = {
     "Palacio": {
         tipo: "Admin", icono: "🏰", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 12 },
+            { "Cualquier Madera": 12 },
             { "Marfil": 4, "Piel": 6 },
             { "Roca": 10 },
             { "Metal": 8 },
@@ -752,7 +782,7 @@ const EDIFICIOS = {
     "Ala Concejal": {
         tipo: "Admin", icono: "⚖️", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 28 },
+            { "Cualquier Madera": 28 },
             { "Marfil": 9, "Piel": 14 },
             { "Roca": 23 },
             { "Metal": 19 },
@@ -775,7 +805,7 @@ const EDIFICIOS = {
     "Cultivo Agrícola": {
         tipo: "Prod.", icono: "🌾", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 2 },
+            { "Cualquier Madera": 2 },
             { "Marfil": 1 },
             { "Doblones": 4 }
         ],
@@ -786,13 +816,13 @@ const EDIFICIOS = {
     "Manufactura": {
         tipo: "Prod.", icono: "🏭", maxGrado: 4,
         costesG1: [
-            { "Madera": 5 },
+            { "Cualquier Madera": 5 },
             { "Metal": 3 },
             { "Roca": 4 },
             { "Doblones": 11 }
         ],
         costesMejora: [
-            { "Madera": 2 },
+            { "Cualquier Madera": 2 },
             { "Metal": 1 },
             { "Roca": 2 },
             { "Doblones": 5 }
@@ -805,7 +835,7 @@ const EDIFICIOS = {
     "Molinar": {
         tipo: "Prod.", icono: "🌬️", maxGrado: 1,
         costesG1: [
-            { "Madera": 7, "Fibra": 1 },
+            { "Cualquier Madera": 7, "Fibra": 1 },
             { "Roca": 6, "Fibra": 1 },
             { "Doblones": 17 }
         ],
@@ -841,7 +871,7 @@ const EDIFICIOS = {
     "Taller": {
         tipo: "Prod.", icono: "🔧", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 4 },
+            { "Cualquier Madera": 4 },
             { "Roca": 3 },
             { "Metal": 2 },
             { "Doblones": 9 }
@@ -854,7 +884,7 @@ const EDIFICIOS = {
         costesG1: [
             { "Acero": 20, "Maquinaria": 2 },
             { "Roca": 160, "Maquinaria": 2 },
-            { "Madera": 190, "Maquinaria": 2 },
+            { "Cualquier Madera": 190, "Maquinaria": 2 },
             { "Doblones": 400 }
         ],
         descripcion: "Efecto Pasivo: Tus Artesanos producen +1 a todo Recurso Procesado.",
@@ -865,7 +895,7 @@ const EDIFICIOS = {
     "Mercado": {
         tipo: "Econ.", icono: "🏪", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 3 },
+            { "Cualquier Madera": 3 },
             { "Marfil": 1, "Piel": 2 },
             { "Roca": 3 },
             { "Doblones": 7 }
@@ -898,7 +928,7 @@ const EDIFICIOS = {
     "Cuartel": {
         tipo: "Militar", icono: "⚔️", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 3 },
+            { "Cualquier Madera": 3 },
             { "Marfil": 1, "Piel": 2 },
             { "Roca": 3 },
             { "Metal": 2 },
@@ -911,14 +941,14 @@ const EDIFICIOS = {
     "Barracas": {
         tipo: "Militar", icono: "🛌", maxGrado: 3,
         costesG1: [
-            { "Madera": 8 },
+            { "Cualquier Madera": 8 },
             { "Marfil": 3, "Piel": 4 },
             { "Metal": 5 },
             { "Roca": 7 },
             { "Doblones": 17 }
         ],
         costesMejora: [
-            { "Madera": 2 },
+            { "Cualquier Madera": 2 },
             { "Marfil": 1, "Piel": 1 },
             { "Metal": 1 },
             { "Roca": 2 },
@@ -969,14 +999,14 @@ const EDIFICIOS = {
     "Muros": {
         tipo: "Defensa", icono: "🧱", maxGrado: 5,
         costesG1: [
-            { "Madera": 14 },
+            { "Cualquier Madera": 14 },
             { "Metal": 4, "Roca": 9 },
             { "Metal": 10 },
             { "Roca": 11 },
             { "Doblones": 30 }
         ],
         costesMejora: [
-            { "Madera": 2 },
+            { "Cualquier Madera": 2 },
             { "Piel": 1 },
             { "Metal": 1 },
             { "Roca": 2 },
@@ -988,13 +1018,13 @@ const EDIFICIOS = {
     "Vigía": {
         tipo: "Defensa", icono: "🔭", maxGrado: 4,
         costesG1: [
-            { "Madera Útil": 3 },
+            { "Cualquier Madera": 3 },
             { "Metal": 2 },
             { "Roca": 3 },
             { "Doblones": 7 }
         ],
         costesMejora: [
-            { "Madera": 2 },
+            { "Cualquier Madera": 2 },
             { "Metal": 1 },
             { "Roca": 2 },
             { "Doblones": 4 }
@@ -1007,7 +1037,7 @@ const EDIFICIOS = {
     "Academia": {
         tipo: "Conoc.", icono: "🎓", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 7 },
+            { "Cualquier Madera": 7 },
             { "Marfil": 2, "Piel": 4 },
             { "Roca": 6 },
             { "Metal": 5 },
@@ -1020,13 +1050,13 @@ const EDIFICIOS = {
     "Escuela": {
         tipo: "Conoc.", icono: "🏫", maxGrado: 2,
         costesG1: [
-            { "Madera": 11, "Mueble": 1 },
+            { "Cualquier Madera": 11, "Mueble": 1 },
             { "Marfil": 4, "Piel": 6, "Mueble": 1 },
             { "Roca": 9, "Mueble": 1 },
             { "Doblones": 38 }
         ],
         costesMejora: [
-            { "Madera": 2, "Mueble": 1 },
+            { "Cualquier Madera": 2, "Mueble": 1 },
             { "Marfil": 1, "Mueble": 1 },
             { "Roca": 2, "Mueble": 1 },
             { "Doblones": 13 }
@@ -1053,12 +1083,12 @@ const EDIFICIOS = {
     "Universidad": {
         tipo: "Conoc.", icono: "🏛️", maxGrado: 3,
         costesG1: [
-            { "Madera": 250, "Mueble": 5 },
+            { "Cualquier Madera": 250, "Mueble": 5 },
             { "Roca": 208, "Mueble": 5 },
             { "Doblones": 565 }
         ],
         costesMejora: [
-            { "Madera": 20, "Mueble": 2 },
+            { "Cualquier Madera": 20, "Mueble": 2 },
             { "Roca": 17, "Mueble": 2 },
             { "Doblones": 53 }
         ],
@@ -1068,7 +1098,7 @@ const EDIFICIOS = {
     "Archivo": {
         tipo: "Conoc.", icono: "📚", maxGrado: 1,
         costesG1: [
-            { "Madera": 3, "Fibra": 1 },
+            { "Cualquier Madera": 3, "Fibra": 1 },
             { "Roca": 3, "Fibra": 1 },
             { "Doblones": 9 }
         ],
@@ -1080,13 +1110,13 @@ const EDIFICIOS = {
     "Zona Residencial": {
         tipo: "Vivienda", icono: "🏠", maxGrado: 3,
         costesG1: [
-            { "Madera Útil": 3 },
+            { "Cualquier Madera": 3 },
             { "Marfil": 1, "Piel": 2 },
             { "Roca": 3 },
             { "Doblones": 7 }
         ],
         costesMejora: [
-            { "Madera Útil": 3 },
+            { "Cualquier Madera": 3 },
             { "Marfil": 1, "Piel": 2 },
             { "Roca": 3 },
             { "Doblones": 7 }
@@ -1098,12 +1128,12 @@ const EDIFICIOS = {
     "Almacén": {
         tipo: "Logística", icono: "📦", maxGrado: 4,
         costesG1: [
-            { "Madera": 4 },
+            { "Cualquier Madera": 4 },
             { "Marfil": 1, "Piel": 3 },
             { "Doblones": 9 }
         ],
         costesMejora: [
-            { "Madera": 2 },
+            { "Cualquier Madera": 2 },
             { "Marfil": 1, "Piel": 1 },
             { "Doblones": 5 }
         ],
@@ -1125,7 +1155,7 @@ const EDIFICIOS = {
     "Bahía": {
         tipo: "Naval", icono: "⚓", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 3 },
+            { "Cualquier Madera": 3 },
             { "Doblones": 7 }
         ],
         descripcion: "Habilita Navíos. +1 Pesca."
@@ -1134,7 +1164,7 @@ const EDIFICIOS = {
         tipo: "Naval", icono: "🚢", maxGrado: 1,
         costesG1: [
             { "Roca": 10, "Metal": 4 },
-            { "Madera": 12, "Metal": 4 },
+            { "Cualquier Madera": 12, "Metal": 4 },
             { "Doblones": 39 }
         ],
         descripcion: "Contacto costero. +1 Pesca."
@@ -1153,7 +1183,7 @@ const EDIFICIOS = {
         tipo: "Magia", icono: "🧙‍♂️", maxGrado: 1,
         costesG1: [
             { "Roca": 10, "Cristal": 2 },
-            { "Madera": 12, "Cristal": 2 },
+            { "Cualquier Madera": 12, "Cristal": 2 },
             { "Doblones": 35 }
         ],
         capacidad: { base: 2, rol: "Mix_Arc_Pob" },
@@ -1180,7 +1210,7 @@ const EDIFICIOS = {
     "Sitio Sagrado": {
         tipo: "Religión", icono: "⛩️", maxGrado: 1,
         costesG1: [
-            { "Madera Útil": 6 },
+            { "Cualquier Madera": 6 },
             { "Marfil": 2, "Piel": 3 },
             { "Roca": 5 },
             { "Doblones": 13 }
@@ -1203,7 +1233,7 @@ const EDIFICIOS = {
         tipo: "Especial", icono: "⚡", maxGrado: 1,
         costesG1: [
             { "Roca": 10, "Metal": 4 },
-            { "Madera": 12, "Metal": 4 },
+            { "Cualquier Madera": 12, "Metal": 4 },
             { "Doblones": 39 }
         ],
         capacidad: { base: 2, rol: "Mix_Carb_Ener" },
@@ -1220,14 +1250,14 @@ const EDIFICIOS = {
     "Ala Festiva": {
         tipo: "Social", icono: "🎉", maxGrado: 5,
         costesG1: [
-            { "Madera": 6 },
+            { "Cualquier Madera": 6 },
             { "Marfil": 2, "Piel": 3 },
             { "Metal": 4 },
             { "Roca": 5 },
             { "Doblones": 13 }
         ],
         costesMejora: [
-            { "Madera": 2 },
+            { "Cualquier Madera": 2 },
             { "Piel": 1 },
             { "Metal": 1 },
             { "Roca": 2 },
@@ -1247,7 +1277,7 @@ const RECETAS_MANUFACTURA = {
         "fertilizante": {
             "edificio": "Manufactura",
             "opcion_a": { "input": { "Guano": 20 }, "output": { "Recurso": "Fertilizante", "Cantidad": 10 } },
-            "opcion_b": { "input": { "Carbon": 10, "Madera": 10 }, "output": { "Recurso": "Fertilizante", "Cantidad": 10 } }
+            "opcion_b": { "input": { "Carbon": 10, "Cualquier Madera": 10 }, "output": { "Recurso": "Fertilizante", "Cantidad": 10 } }
         },
         "combustibles": {
             "edificio": "Manufactura",
@@ -1256,9 +1286,9 @@ const RECETAS_MANUFACTURA = {
         }
     },
     "construccion_y_hogar": {
-        "muebles": { "input": { "Madera": 10, "Fibra": 10 }, "output": { "Recurso": "Muebles", "Cantidad": 10 } },
-        "muebles_de_lujo": { "input": { "Madera": 10, "Textil Magico": 20 }, "output": { "Recurso": "Muebles Lujo", "Cantidad": 10 } },
-        "herramientas_rudimentarias": { "input": { "Madera": 10 }, "output": { "Recurso": "Herramientas Rudimentarias", "Cantidad": 10 } },
+        "muebles": { "input": { "Cualquier Madera": 10, "Fibra": 10 }, "output": { "Recurso": "Muebles", "Cantidad": 10 } },
+        "muebles_de_lujo": { "input": { "Cualquier Madera": 10, "Textil Magico": 20 }, "output": { "Recurso": "Muebles Lujo", "Cantidad": 10 } },
+        "herramientas_rudimentarias": { "input": { "Cualquier Madera": 10 }, "output": { "Recurso": "Herramientas Rudimentarias", "Cantidad": 10 } },
         "herramientas": { "input": { "Roca": 20 }, "output": { "Recurso": "Herramientas", "Cantidad": 10 } },
         "cristaleria": { "input": { "Roca": 10 }, "output": { "Recurso": "Cristaleria", "Cantidad": 10 } }
     },
@@ -1292,7 +1322,7 @@ const RECETAS_MANUFACTURA = {
         "maquinaria": { "edificio": "Manufactura", "input": { "Acero": 20, "Metal": 20, "Caucho": 10, "Plastico": 20 }, "output": { "Recurso": "Maquinaria", "Cantidad": 10 } }
     },
     "armamento_y_defensa": {
-        "armas_rudimentarias": { "edificio": "Forja", "input": { "Madera": 10 }, "output": { "Recurso": "Armas Rudimentarias", "Cantidad": 10 } },
+        "armas_rudimentarias": { "edificio": "Forja", "input": { "Cualquier Madera": 10 }, "output": { "Recurso": "Armas Rudimentarias", "Cantidad": 10 } },
         "armas": { "edificio": "Forja", "input": { "Metal": 20 }, "output": { "Recurso": "Armas", "Cantidad": 10 } },
         "armas_excelsas": { "edificio": "Forja", "input": { "Acero": 20 }, "output": { "Recurso": "Armas Excelsas", "Cantidad": 10 } },
         "armas_de_fuego": { "edificio": "Forja", "input": { "Acero": 10, "Polvora": 10 }, "output": { "Recurso": "Armas Fuego", "Cantidad": 10 } },
@@ -1302,7 +1332,7 @@ const RECETAS_MANUFACTURA = {
         "canon_balistico": { "edificio": "Forja", "input": { "Acero": 30, "Material Balistico": 10 }, "output": { "Recurso": "Canon Balistico", "Cantidad": 10 } }
     },
     "vehiculos": {
-        "carruajes": { "edificio": "Manufactura", "input": { "Madera": 40, "Metal": 10 }, "output": { "Recurso": "Carruajes", "Cantidad": 10 } }
+        "carruajes": { "edificio": "Manufactura", "input": { "Cualquier Madera": 40, "Metal": 10 }, "output": { "Recurso": "Carruajes", "Cantidad": 10 } }
     }
 };
 
