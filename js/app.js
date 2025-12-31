@@ -171,13 +171,23 @@ function calcularEstadisticasTotales(asentamiento) {
     const modMantenimiento = bonificaciones["Mantenimiento"] || 0;
     const mantenimientoTotal = calcularMantenimientoEdificios(asentamiento.edificios || [], modMantenimiento);
 
+    // Obtener bonificaciones de eventos
+    const bonificacionesEventos = asentamiento.bonificacionesEventos || {};
+    const calidadEventos = bonificacionesEventos["Calidad"] || 0;
+
+    // Combinar bonificaciones de peculiaridades/propiedades con las de eventos
+    const bonificacionesTotales = { ...bonificaciones };
+    Object.entries(bonificacionesEventos).forEach(([key, value]) => {
+        bonificacionesTotales[key] = (bonificacionesTotales[key] || 0) + value;
+    });
+
     return {
         grado: gradoStats,
-        bonificaciones: bonificaciones,
+        bonificaciones: bonificacionesTotales,
         tributo: tributoData,
         efectosEdificios: efectosEdificios,
         mantenimientoEdificios: mantenimientoTotal,
-        calidadTotal: gradoStats.calidad + (bonificaciones["Calidad"] || 0) + tributoData.calidad + (efectosEdificios.calidad || 0),
+        calidadTotal: gradoStats.calidad + (bonificaciones["Calidad"] || 0) + tributoData.calidad + (efectosEdificios.calidad || 0) + calidadEventos,
         almacenamientoBonus: efectosEdificios.almacenamiento || 0,
         ingresosDoblones: efectosEdificios.ingresos || 0
     };

@@ -129,8 +129,66 @@ function obtenerAsentamientoActual() {
 // RENDERIZADO DE PANTALLAS
 // =====================================================
 
+// UI State preservation
+let uiStateCache = {
+  scrollPosition: 0,
+  detailsStates: {},
+  activeElement: null
+};
+
+/**
+ * Saves the current UI state (scroll position, open details, etc.)
+ */
+function guardarEstadoUI() {
+  // Save scroll position
+  uiStateCache.scrollPosition = window.scrollY || document.documentElement.scrollTop;
+
+  // Save open/closed state of all details elements
+  uiStateCache.detailsStates = {};
+  document.querySelectorAll('details').forEach((det, idx) => {
+    const id = det.id || `details-${idx}`;
+    uiStateCache.detailsStates[id] = det.open;
+  });
+
+  // Save active element info
+  const activeEl = document.activeElement;
+  if (activeEl && activeEl.id) {
+    uiStateCache.activeElement = activeEl.id;
+  }
+}
+
+/**
+ * Restores the saved UI state (scroll position, open details, etc.)
+ */
+function restaurarEstadoUI() {
+  // Restore scroll position
+  requestAnimationFrame(() => {
+    window.scrollTo(0, uiStateCache.scrollPosition);
+  });
+
+  // Restore details states
+  document.querySelectorAll('details').forEach((det, idx) => {
+    const id = det.id || `details-${idx}`;
+    if (uiStateCache.detailsStates[id] !== undefined) {
+      det.open = uiStateCache.detailsStates[id];
+    }
+  });
+
+  // Restore focus if possible
+  if (uiStateCache.activeElement) {
+    const el = document.getElementById(uiStateCache.activeElement);
+    if (el) el.focus();
+  }
+}
+
 function renderizarPantalla() {
   const container = document.getElementById('app-container');
+  const esHUD = estadoApp.pantalla === 'hud';
+
+  // Save UI state before re-rendering HUD
+  if (esHUD) {
+    guardarEstadoUI();
+  }
 
   switch (estadoApp.pantalla) {
     case 'inicio':
@@ -151,11 +209,22 @@ function renderizarPantalla() {
     default:
       renderizarInicio(container);
   }
+
+  // Restore UI state after rendering HUD
+  if (esHUD) {
+    restaurarEstadoUI();
+  }
 }
 
 function actualizarHUD() {
-  // Wrapper to refresh the current screen, assuming it's the HUD
+  // Save UI state before re-render
+  guardarEstadoUI();
+
+  // Re-render
   renderizarPantalla();
+
+  // Restore UI state after re-render
+  restaurarEstadoUI();
 }
 
 /**
@@ -545,6 +614,13 @@ function volverInicio() {
 }
 
 function volverALista() {
+  // IMPORTANT: Save current settlement's simulation state before leaving
+  const asentamientoActual = obtenerAsentamientoActual();
+  if (asentamientoActual && estadoSimulacion) {
+    asentamientoActual.simulacion = JSON.parse(JSON.stringify(estadoSimulacion));
+    guardarExpedicion();
+  }
+
   estadoApp.pantalla = 'lista';
   renderizarPantalla();
 }
@@ -2486,6 +2562,7 @@ function renderizarNavegacionHUD() {
     { id: 'edificios', icono: '🏛️', label: 'Edificios' },
     { id: 'almacenamiento', icono: '📦', label: 'Almacén' },
     { id: 'comercio', icono: '⚖️', label: 'Comercio' },
+    { id: 'eventos', icono: '📜', label: 'Eventos' },
     { id: 'militar', icono: '⚔️', label: 'Militar' },
     { id: 'diplomacia', icono: '🤝', label: 'Diplomacia' },
     { id: 'devocion', icono: '🙏', label: 'Devoción' }
@@ -2520,6 +2597,7 @@ function renderizarContenidoPestana(a, stats) {
     case 'edificios': return renderizarPestanaEdificios(a, stats);
     case 'almacenamiento': return renderizarPestanaAlmacenamiento(a, stats);
     case 'comercio': return renderizarPestanaComercio(a, stats);
+    case 'eventos': return renderizarPestanaEventos(a, stats);
     default: return renderizarPestanaBioma(a, stats);
   }
 }
@@ -2772,6 +2850,313 @@ function renderizarListaBonificaciones(bonificaciones) {
   }).join('');
 }
 
+/**
+ * Renderiza la pestaña de Eventos
+ * Los eventos pueden modificar cualquier característica del asentamiento
+ */
+function renderizarPestanaEventos(a, stats) {
+  const turnoActual = estadoSimulacion?.turno || 0;
+  const eventos = a.eventos || [];
+  const eventosOrdenados = [...eventos].sort((a, b) => b.turno - a.turno);
+
+  // Tipos de eventos disponibles
+  const tiposEvento = [
+    { id: 'recurso_almacen', nombre: 'Modificar Almacén', icono: '📦' },
+    { id: 'recurso_abundancia', nombre: 'Modificar Abundancia', icono: '🌾' },
+    { id: 'bonificador', nombre: 'Modificar Bonificador', icono: '📊' },
+    { id: 'doblones', nombre: 'Modificar Doblones', icono: '💰' },
+    { id: 'calidad', nombre: 'Modificar Calidad', icono: '⭐' },
+    { id: 'poblacion', nombre: 'Modificar Población', icono: '👥' },
+    { id: 'propiedad', nombre: 'Agregar/Quitar Propiedad', icono: '🏷️' },
+    { id: 'peculiaridad', nombre: 'Agregar/Quitar Peculiaridad', icono: '✨' },
+    { id: 'otro', nombre: 'Evento Narrativo', icono: '📝' }
+  ];
+
+  // Recursos disponibles para modificar
+  const recursosDisponibles = Object.keys(RECURSOS || {});
+
+  // Abundancias disponibles
+  const abundancias = ['Inexistente', 'Escaso', 'Normal', 'Abundante', 'Exuberante'];
+
+  const renderFormulario = () => `
+    <div class="evento-form">
+        <h4>📜 Registrar Nuevo Evento</h4>
+        <div class="form-grid-evento">
+            <div class="form-group">
+                <label>Tipo de Evento</label>
+                <select id="evento-tipo" class="select-form" onchange="actualizarFormularioEvento()">
+                    ${tiposEvento.map(t => `<option value="${t.id}">${t.icono} ${t.nombre}</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Turno</label>
+                <input type="number" id="evento-turno" class="input-form" min="0" value="${turnoActual}" />
+            </div>
+        </div>
+        
+        <div id="evento-campos-dinamicos" class="form-grid-evento">
+            <!-- Campos dinámicos según tipo -->
+            <div class="form-group">
+                <label>Recurso</label>
+                <select id="evento-recurso" class="select-form">
+                    ${recursosDisponibles.map(r => `<option value="${r}">${RECURSOS[r]?.icono || '📦'} ${r}</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Cantidad (+ o -)</label>
+                <input type="number" id="evento-cantidad" class="input-form" value="0" />
+            </div>
+        </div>
+        
+        <div class="form-group" style="grid-column: 1 / -1;">
+            <label>Descripción del Evento</label>
+            <input type="text" id="evento-descripcion" class="input-form" placeholder="Ej: Llegó una caravana comercial..." />
+        </div>
+        
+        <button class="btn-registrar-evento" onclick="registrarEvento()">
+            📜 Registrar Evento
+        </button>
+    </div>
+  `;
+
+  const renderHistorial = () => {
+    if (eventosOrdenados.length === 0) {
+      return `
+        <div class="eventos-vacio">
+            <div class="icono-vacio">📜</div>
+            <p>No hay eventos registrados.</p>
+        </div>
+      `;
+    }
+
+    return `
+      <table class="tabla-eventos">
+          <thead>
+              <tr>
+                  <th>Turno</th>
+                  <th>Tipo</th>
+                  <th>Descripción</th>
+                  <th>Efecto</th>
+                  <th>Acciones</th>
+              </tr>
+          </thead>
+          <tbody>
+              ${eventosOrdenados.map((evento, index) => `
+                  <tr>
+                      <td><strong>${evento.turno}</strong></td>
+                      <td>
+                          <span class="badge-evento">
+                              ${tiposEvento.find(t => t.id === evento.tipo)?.icono || '📜'}
+                              ${tiposEvento.find(t => t.id === evento.tipo)?.nombre || evento.tipo}
+                          </span>
+                      </td>
+                      <td>${evento.descripcion || '-'}</td>
+                      <td class="${evento.valorNumerico >= 0 ? 'positivo' : 'negativo'}">
+                          ${formatearEfectoEvento(evento)}
+                      </td>
+                      <td class="acciones-evento">
+                          <button class="btn-accion btn-eliminar" onclick="eliminarEvento(${index})" title="Eliminar evento">
+                              🗑️
+                          </button>
+                      </td>
+                  </tr>
+              `).join('')}
+          </tbody>
+      </table>
+    `;
+  };
+
+  return `
+    <div class="panel panel-full panel-eventos">
+        <h3>📜 Eventos del Asentamiento</h3>
+        <p class="panel-descripcion">
+            Registra eventos que afectan al asentamiento: llegadas de caravanas, desastres naturales, 
+            descubrimientos, cambios políticos, etc.
+        </p>
+        
+        ${renderFormulario()}
+        
+        <div class="eventos-historial">
+            <h4>📚 Historial de Eventos</h4>
+            ${renderHistorial()}
+        </div>
+    </div>
+  `;
+}
+
+/**
+ * Formatea el efecto de un evento para mostrar en la tabla
+ */
+function formatearEfectoEvento(evento) {
+  switch (evento.tipo) {
+    case 'recurso_almacen':
+      return `${evento.valorNumerico >= 0 ? '+' : ''}${evento.valorNumerico} ${evento.objetivo}`;
+    case 'recurso_abundancia':
+      return `${evento.objetivo}: ${evento.valorTexto}`;
+    case 'bonificador':
+      return `${evento.objetivo}: ${evento.valorNumerico >= 0 ? '+' : ''}${evento.valorNumerico}`;
+    case 'doblones':
+      return `${evento.valorNumerico >= 0 ? '+' : ''}${evento.valorNumerico} 💰`;
+    case 'calidad':
+      return `Calidad ${evento.valorNumerico >= 0 ? '+' : ''}${evento.valorNumerico}`;
+    case 'poblacion':
+      return `${evento.valorNumerico >= 0 ? '+' : ''}${evento.valorNumerico} cuotas`;
+    case 'propiedad':
+    case 'peculiaridad':
+      return `${evento.accion === 'agregar' ? '+ ' : '- '}${evento.objetivo}`;
+    case 'otro':
+    default:
+      return evento.valorTexto || 'Narrativo';
+  }
+}
+
+/**
+ * Registra un nuevo evento y aplica sus efectos
+ */
+function registrarEvento() {
+  const asentamiento = estadoApp.asentamiento;
+  if (!asentamiento) {
+    mostrarNotificacion('No hay asentamiento seleccionado', 'error');
+    return;
+  }
+
+  const tipo = document.getElementById('evento-tipo')?.value;
+  const turno = parseInt(document.getElementById('evento-turno')?.value) || 0;
+  const descripcion = document.getElementById('evento-descripcion')?.value || '';
+  const recurso = document.getElementById('evento-recurso')?.value;
+  const cantidad = parseInt(document.getElementById('evento-cantidad')?.value) || 0;
+
+  // Crear el evento
+  const evento = {
+    id: Date.now(),
+    tipo,
+    turno,
+    descripcion,
+    fechaRegistro: new Date().toISOString()
+  };
+
+  // Aplicar efectos según el tipo
+  switch (tipo) {
+    case 'recurso_almacen':
+      evento.objetivo = recurso;
+      evento.valorNumerico = cantidad;
+      // Aplicar al almacén
+      if (!estadoSimulacion.almacen) estadoSimulacion.almacen = {};
+      estadoSimulacion.almacen[recurso] = (estadoSimulacion.almacen[recurso] || 0) + cantidad;
+      if (estadoSimulacion.almacen[recurso] <= 0) delete estadoSimulacion.almacen[recurso];
+      break;
+
+    case 'doblones':
+      evento.valorNumerico = cantidad;
+      estadoSimulacion.doblones = (estadoSimulacion.doblones || 0) + cantidad;
+      break;
+
+    case 'recurso_abundancia':
+      const abundanciaSelect = document.getElementById('evento-abundancia');
+      const nuevaAbundancia = abundanciaSelect?.value || 'Normal';
+      evento.objetivo = recurso;
+      evento.valorTexto = nuevaAbundancia;
+      // Modificar abundancia en recursos del asentamiento
+      if (asentamiento.recursos && asentamiento.recursos[recurso]) {
+        evento.valorAnterior = asentamiento.recursos[recurso].abundancia;
+        asentamiento.recursos[recurso].abundancia = nuevaAbundancia;
+      }
+      break;
+
+    case 'bonificador':
+      const bonificador = document.getElementById('evento-bonificador')?.value || 'Calidad';
+      evento.objetivo = bonificador;
+      evento.valorNumerico = cantidad;
+      // Agregar a bonificacion de eventos
+      if (!asentamiento.bonificacionesEventos) asentamiento.bonificacionesEventos = {};
+      asentamiento.bonificacionesEventos[bonificador] = (asentamiento.bonificacionesEventos[bonificador] || 0) + cantidad;
+      break;
+
+    case 'calidad':
+      evento.valorNumerico = cantidad;
+      if (!asentamiento.bonificacionesEventos) asentamiento.bonificacionesEventos = {};
+      asentamiento.bonificacionesEventos['Calidad'] = (asentamiento.bonificacionesEventos['Calidad'] || 0) + cantidad;
+      break;
+
+    case 'poblacion':
+      evento.valorNumerico = cantidad;
+      // Agregar o quitar cuotas de población
+      if (cantidad > 0) {
+        for (let i = 0; i < cantidad; i++) {
+          const maxId = Math.max(...estadoSimulacion.poblacion.map(c => c.id), 0);
+          estadoSimulacion.poblacion.push({
+            id: maxId + 1,
+            rol: 'Plebeyo',
+            naturaleza: 'Neutral',
+            medidas: 20,
+            asignacion: null
+          });
+        }
+      } else if (cantidad < 0) {
+        for (let i = 0; i < Math.abs(cantidad) && estadoSimulacion.poblacion.length > 0; i++) {
+          estadoSimulacion.poblacion.pop();
+        }
+      }
+      break;
+
+    case 'propiedad':
+    case 'peculiaridad':
+      const accion = document.getElementById('evento-accion')?.value || 'agregar';
+      const nombre = document.getElementById('evento-nombre')?.value || '';
+      evento.accion = accion;
+      evento.objetivo = nombre;
+      const lista = tipo === 'propiedad' ? asentamiento.propiedades : asentamiento.peculiaridades;
+      if (accion === 'agregar' && nombre && !lista.includes(nombre)) {
+        lista.push(nombre);
+      } else if (accion === 'quitar') {
+        const idx = lista.indexOf(nombre);
+        if (idx >= 0) lista.splice(idx, 1);
+      }
+      break;
+
+    case 'otro':
+    default:
+      evento.valorTexto = descripcion;
+      break;
+  }
+
+  // Guardar evento
+  if (!asentamiento.eventos) asentamiento.eventos = [];
+  asentamiento.eventos.push(evento);
+
+  // Guardar estado
+  asentamiento.simulacion = JSON.parse(JSON.stringify(estadoSimulacion));
+  guardarExpedicion();
+
+  mostrarNotificacion('📜 Evento registrado', 'success');
+  renderizarPantalla();
+}
+
+/**
+ * Elimina un evento (sin revertir sus efectos)
+ */
+function eliminarEvento(index) {
+  const asentamiento = estadoApp.asentamiento;
+  if (!asentamiento || !asentamiento.eventos) return;
+
+  const eventosOrdenados = [...asentamiento.eventos].sort((a, b) => b.turno - a.turno);
+  const evento = eventosOrdenados[index];
+
+  if (!confirm(`¿Eliminar este evento?\n\n${evento.descripcion || 'Sin descripción'}\n\n⚠️ Los efectos del evento NO se revertirán automáticamente.`)) {
+    return;
+  }
+
+  // Encontrar y eliminar el evento original
+  const originalIndex = asentamiento.eventos.findIndex(e => e.id === evento.id);
+  if (originalIndex >= 0) {
+    asentamiento.eventos.splice(originalIndex, 1);
+  }
+
+  guardarExpedicion();
+  mostrarNotificacion('Evento eliminado', 'success');
+  renderizarPantalla();
+}
+
 
 function renderizarPestanaMilitar(a, stats) {
   return `<div class="panel panel-full"><h3>⚔️ Militar</h3><div class="panel-contenido"><p>En construcción...</p></div></div>`;
@@ -2783,6 +3168,93 @@ function renderizarPestanaDiplomacia(a, stats) {
 
 function renderizarPestanaDevocion(a, stats) {
   return `<div class="panel panel-full"><h3>🙏 Devoción</h3><div class="panel-contenido"><p>En construcción...</p></div></div>`;
+}
+
+/**
+ * Renderiza la tabla editable de población
+ */
+function renderizarTablaPoblacionEditable() {
+  const tiposPoblacion = ["Neutral", "Positiva", "Negativa", "Monstruo", "Artificial"];
+  const iconosTipo = { Neutral: "⚪", Positiva: "🌟", Negativa: "🌑", Monstruo: "👹", Artificial: "🤖" };
+  const roles = ["Académicos", "Especiales", "Soldados", "Artesanos", "Plebeyos", "Esclavos"];
+  const iconosRol = { Académicos: "📚", Especiales: "✨", Soldados: "⚔️", Artesanos: "🔨", Plebeyos: "👷", Esclavos: "⛓️" };
+
+  if (!estadoSimulacion?.poblacion || estadoSimulacion.poblacion.length === 0) {
+    return `<p style="text-align:center; opacity:0.6;">No hay población.</p>
+            <button onclick="agregarCuotaPoblacion('Neutral','Plebeyos')" style="background:rgba(100,200,100,0.2); border:1px solid rgba(100,200,100,0.5); color:#fff; padding:0.4rem 0.8rem; border-radius:6px; cursor:pointer; margin-top:1rem;">➕ Agregar Cuota</button>`;
+  }
+
+  let html = `<table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+    <thead><tr style="border-bottom:2px solid rgba(255,255,255,0.2);">
+      <th style="text-align:left; padding:0.5rem;">ID</th>
+      <th style="text-align:left; padding:0.5rem;">Naturaleza</th>
+      <th style="text-align:left; padding:0.5rem;">Rol</th>
+      <th style="text-align:left; padding:0.5rem;">Estado</th>
+      <th style="text-align:center; padding:0.5rem;">⚙️</th>
+    </tr></thead><tbody>`;
+
+  estadoSimulacion.poblacion.forEach(p => {
+    const icon = iconosTipo[p.naturaleza] || '⚪';
+    const naturalezaOptions = tiposPoblacion.map(t =>
+      `<option value="${t}" ${p.naturaleza === t ? 'selected' : ''}>${iconosTipo[t]} ${t}</option>`
+    ).join('');
+    const rolOptions = roles.map(r =>
+      `<option value="${r}" ${p.rol === r ? 'selected' : ''}>${iconosRol[r]} ${r}</option>`
+    ).join('');
+
+    // Determinar estado: asignación a recurso, edificio, o construcción en progreso
+    let estadoTexto = '⏸️ Ocioso';
+    if (p.asignacion) {
+      estadoTexto = '🔧 ' + p.asignacion;
+    } else {
+      // Verificar si está asignado a una construcción en progreso
+      // Note: construcciones pueden usar 'Trabajadores' (número) o 'poblacionAsignada' (array)
+      const construccion = estadoSimulacion.construccionesEnProgreso?.find(c => {
+        if (Array.isArray(c.poblacionAsignada)) {
+          return c.poblacionAsignada.includes(p.id);
+        }
+        return false; // Trabajadores es un conteo, no IDs específicos
+      });
+      if (construccion) {
+        estadoTexto = '🚧 Construyendo: ' + construccion.nombre;
+      }
+    }
+
+    html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+      <td style="padding:0.4rem;">${icon} <strong>#${p.id}</strong></td>
+      <td style="padding:0.4rem;">
+        <select onchange="cambiarNaturalezaPoblacion(${p.id}, this.value)" 
+                style="padding:0.25rem; border-radius:4px; background:#333; color:#fff; border:1px solid #555; font-size:0.8rem;">
+          ${naturalezaOptions}
+        </select>
+      </td>
+      <td style="padding:0.4rem;">
+        <select onchange="cambiarRolPoblacion(${p.id}, this.value)" 
+                style="padding:0.25rem; border-radius:4px; background:#333; color:#fff; border:1px solid #555; font-size:0.8rem;">
+          ${rolOptions}
+        </select>
+      </td>
+      <td style="padding:0.4rem; opacity:0.7; font-size:0.8rem;">
+        ${estadoTexto}
+      </td>
+      <td style="padding:0.4rem; text-align:center;">
+        <button onclick="eliminarCuotaPoblacion(${p.id})" 
+                style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fff; padding:0.2rem 0.4rem; border-radius:4px; cursor:pointer; font-size:0.8rem;"
+                title="Eliminar cuota">🗑️</button>
+      </td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>
+    <div style="margin-top:1rem; padding-top:0.8rem; border-top:1px solid rgba(255,255,255,0.1);">
+      <button onclick="agregarCuotaPoblacion('Neutral','Plebeyos')" 
+              style="background:rgba(100,200,100,0.2); border:1px solid rgba(100,200,100,0.5); color:#fff; padding:0.4rem 0.8rem; border-radius:6px; cursor:pointer;">
+        ➕ Agregar Cuota
+      </button>
+      <span style="margin-left:0.5rem; opacity:0.6; font-size:0.8rem;">Agrega población manualmente</span>
+    </div>`;
+
+  return html;
 }
 
 function renderizarPestanaPoblacion(a, stats) {
@@ -2882,18 +3354,9 @@ function renderizarPestanaPoblacion(a, stats) {
             
             <!-- Desglose Individual de Población -->
             <details style="margin-bottom:1rem;">
-                <summary style="cursor:pointer; padding:0.5rem; background:rgba(255,255,255,0.05); border-radius:4px;">📋 Ver desglose individual (${total} cuotas)</summary>
-                <div style="max-height:200px; overflow-y:auto; margin-top:0.5rem; padding:0.5rem; background:rgba(0,0,0,0.2); border-radius:4px;">
-                    ${estadoSimulacion.poblacion?.map((p, idx) => {
-    const icon = iconosTipo[p.naturaleza] || '⚪';
-    const subtipo = p.naturaleza === 'Artificial' && p.subtipo ? ` (${iconosTipo[p.subtipo] || '⚪'} ${p.subtipo})` : '';
-    return `
-                            <div style="display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0; border-bottom:1px solid rgba(255,255,255,0.05);">
-                                <span>${icon} <strong>#${p.id}</strong> ${p.naturaleza}${subtipo}</span>
-                                <span style="opacity:0.7;">${p.rol} ${p.asignacion ? '🔧 ' + p.asignacion : '⏸️ Ocioso'}</span>
-                            </div>
-                        `;
-  }).join('') || '<p>No hay población.</p>'}
+                <summary style="cursor:pointer; padding:0.5rem; background:rgba(255,255,255,0.05); border-radius:4px;">📋 Editar cuotas de población (${total} cuotas)</summary>
+                <div style="margin-top:0.5rem; padding:0.5rem; background:rgba(0,0,0,0.2); border-radius:4px; max-height:400px; overflow-y:auto;">
+                    ${renderizarTablaPoblacionEditable()}
                 </div>
             </details>
 
@@ -3539,10 +4002,11 @@ function renderizarPestanaComercio(a, stats) {
                   <th>Recurso</th>
                   <th>Cantidad</th>
                   <th>Comerciante</th>
+                  <th>Acciones</th>
               </tr>
           </thead>
           <tbody>
-              ${historialOrdenado.map(entry => `
+              ${historialOrdenado.map((entry, index) => `
                   <tr class="${entry.tipo === 'entrada' ? 'tipo-entrada' : 'tipo-salida'}">
                       <td><strong>${entry.turno}</strong></td>
                       <td>
@@ -3558,6 +4022,14 @@ function renderizarPestanaComercio(a, stats) {
                           ${entry.tipo === 'entrada' ? '+' : '-'}${entry.cantidad}
                       </td>
                       <td>${entry.comerciante || '-'}</td>
+                      <td class="acciones-comercio">
+                          <button class="btn-accion btn-editar" onclick="editarTransaccion(${index})" title="Editar transacción">
+                              ✏️
+                          </button>
+                          <button class="btn-accion btn-eliminar" onclick="eliminarTransaccion(${index})" title="Eliminar transacción">
+                              🗑️
+                          </button>
+                      </td>
                   </tr>
               `).join('')}
           </tbody>
@@ -3702,6 +4174,112 @@ function agregarComercioDesdeUI() {
 
   // Actualizar pantalla
   renderizarPantalla();
+}
+
+/**
+ * Edita una transacción de comercio existente
+ * @param {number} index - Índice de la transacción en el historial
+ */
+function editarTransaccion(index) {
+  const historial = estadoSimulacion?.historialComercio;
+  if (!historial || index < 0 || index >= historial.length) {
+    mostrarNotificacion('Transacción no encontrada', 'error');
+    return;
+  }
+
+  const transaccion = historial[index];
+
+  // Rellenar el formulario con los datos de la transacción
+  const tipoSelect = document.getElementById('comercio-tipo');
+  const recursoSelect = document.getElementById('comercio-recurso');
+  const cantidadInput = document.getElementById('comercio-cantidad');
+  const turnoInput = document.getElementById('comercio-turno');
+  const comercianteInput = document.getElementById('comercio-comerciante');
+
+  if (tipoSelect) tipoSelect.value = transaccion.tipo;
+  if (recursoSelect) recursoSelect.value = transaccion.recurso;
+  if (cantidadInput) cantidadInput.value = transaccion.cantidad;
+  if (turnoInput) turnoInput.value = transaccion.turno;
+  if (comercianteInput) comercianteInput.value = transaccion.comerciante || '';
+
+  // Eliminar la transacción original (revertir sus efectos primero)
+  revertirTransaccion(transaccion);
+  historial.splice(index, 1);
+
+  // Guardar estado
+  guardarEstadoAsentamiento();
+
+  mostrarNotificacion('Transacción cargada para edición. Modifica y guarda.', 'info');
+  renderizarPantalla();
+
+  // Hacer scroll al formulario
+  setTimeout(() => {
+    const form = document.querySelector('.comercio-form');
+    if (form) form.scrollIntoView({ behavior: 'smooth' });
+  }, 100);
+}
+
+/**
+ * Elimina una transacción de comercio
+ * @param {number} index - Índice de la transacción en el historial
+ */
+function eliminarTransaccion(index) {
+  const historial = estadoSimulacion?.historialComercio;
+  if (!historial || index < 0 || index >= historial.length) {
+    mostrarNotificacion('Transacción no encontrada', 'error');
+    return;
+  }
+
+  const transaccion = historial[index];
+
+  if (!confirm(`¿Eliminar esta transacción?\n\n${transaccion.tipo === 'entrada' ? '📥 Entrada' : '📤 Salida'}: ${transaccion.cantidad} ${transaccion.recurso}\nTurno: ${transaccion.turno}`)) {
+    return;
+  }
+
+  // Revertir los efectos de la transacción en el almacén
+  revertirTransaccion(transaccion);
+
+  // Eliminar del historial
+  historial.splice(index, 1);
+
+  // Guardar estado
+  guardarEstadoAsentamiento();
+
+  mostrarNotificacion('Transacción eliminada', 'success');
+  renderizarPantalla();
+}
+
+/**
+ * Revierte los efectos de una transacción en el almacén
+ * @param {object} transaccion - La transacción a revertir
+ */
+function revertirTransaccion(transaccion) {
+  if (!estadoSimulacion?.almacen) return;
+
+  const { recurso, cantidad, tipo } = transaccion;
+
+  // Si fue una entrada, restar del almacén
+  // Si fue una salida, sumar al almacén
+  if (tipo === 'entrada') {
+    const actual = estadoSimulacion.almacen[recurso] || 0;
+    estadoSimulacion.almacen[recurso] = Math.max(0, actual - cantidad);
+    if (estadoSimulacion.almacen[recurso] <= 0) {
+      delete estadoSimulacion.almacen[recurso];
+    }
+  } else {
+    estadoSimulacion.almacen[recurso] = (estadoSimulacion.almacen[recurso] || 0) + cantidad;
+  }
+}
+
+/**
+ * Guarda el estado actual del asentamiento
+ */
+function guardarEstadoAsentamiento() {
+  const asentamientoActual = obtenerAsentamientoActual();
+  if (asentamientoActual) {
+    asentamientoActual.simulacion = JSON.parse(JSON.stringify(estadoSimulacion));
+    guardarExpedicion();
+  }
 }
 
 // =====================================================
@@ -4001,10 +4579,27 @@ function controlarPoblacionConstruccion(id, delta) {
   if (typeof asignarPoblacionConstruccion === 'function') {
     const constr = estadoSimulacion.construccionesEnProgreso.find(c => c.id === id);
     if (constr) {
-      const current = constr.poblacionAsignada || 0;
+      const current = constr.Trabajadores || constr.poblacionAsignada || 0;
       const newValue = Math.max(0, current + delta);
-      // Optional: Check idle before adding?
-      // For now allowing override, logic will be handled
+
+      // Validar que no se asignen más trabajadores que la población disponible
+      if (delta > 0) {
+        // Calcular trabajadores disponibles (ociosos)
+        const totalPoblacion = estadoSimulacion.poblacion?.length || 0;
+        const asignadosARecursos = estadoSimulacion.poblacion?.filter(p => p.asignacion).length || 0;
+        const asignadosAConstrucciones = estadoSimulacion.construccionesEnProgreso?.reduce((sum, c) => {
+          if (c.id === id) return sum; // No contar la construcción actual
+          return sum + (c.Trabajadores || c.poblacionAsignada || 0);
+        }, 0) || 0;
+
+        const disponibles = totalPoblacion - asignadosARecursos - asignadosAConstrucciones - current;
+
+        if (disponibles <= 0) {
+          mostrarNotificacion('No hay población disponible para asignar', 'error');
+          return;
+        }
+      }
+
       asignarPoblacionConstruccion(id, newValue);
       actualizarHUD();
     }
@@ -4081,6 +4676,82 @@ function cambiarSubtipoArtificial(subtipo) {
   if (!estadoSimulacion) return;
   estadoSimulacion.subtipoInmigracionArtificial = subtipo;
   actualizarHUD();
+}
+
+// =====================================================
+// POPULATION EDITING FUNCTIONS
+// =====================================================
+
+/**
+ * Cambia la naturaleza de una cuota de población
+ */
+function cambiarNaturalezaPoblacion(id, nuevaNaturaleza) {
+  if (!estadoSimulacion?.poblacion) return;
+
+  const cuota = estadoSimulacion.poblacion.find(p => p.id === id);
+  if (cuota) {
+    cuota.naturaleza = nuevaNaturaleza;
+    guardarEstadoAsentamiento();
+    mostrarNotificacion(`Cuota #${id} ahora es ${nuevaNaturaleza}`, 'success');
+    renderizarPantalla();
+  }
+}
+
+/**
+ * Cambia el rol de una cuota de población
+ */
+function cambiarRolPoblacion(id, nuevoRol) {
+  if (!estadoSimulacion?.poblacion) return;
+
+  const cuota = estadoSimulacion.poblacion.find(p => p.id === id);
+  if (cuota) {
+    cuota.rol = nuevoRol;
+    guardarEstadoAsentamiento();
+    mostrarNotificacion(`Cuota #${id} ahora es ${nuevoRol}`, 'success');
+    renderizarPantalla();
+  }
+}
+
+/**
+ * Elimina una cuota de población
+ */
+function eliminarCuotaPoblacion(id) {
+  if (!estadoSimulacion?.poblacion) return;
+
+  if (!confirm(`¿Eliminar la cuota #${id}?`)) return;
+
+  const index = estadoSimulacion.poblacion.findIndex(p => p.id === id);
+  if (index >= 0) {
+    estadoSimulacion.poblacion.splice(index, 1);
+    guardarEstadoAsentamiento();
+    mostrarNotificacion(`Cuota #${id} eliminada`, 'success');
+    renderizarPantalla();
+  }
+}
+
+/**
+ * Agrega una nueva cuota de población
+ */
+function agregarCuotaPoblacion(naturaleza = 'Neutral', rol = 'Plebeyo') {
+  if (!estadoSimulacion?.poblacion) {
+    estadoSimulacion.poblacion = [];
+  }
+
+  const maxId = estadoSimulacion.poblacion.length > 0
+    ? Math.max(...estadoSimulacion.poblacion.map(c => c.id))
+    : 0;
+
+  estadoSimulacion.poblacion.push({
+    id: maxId + 1,
+    rol: rol,
+    naturaleza: naturaleza,
+    medidas: 20,
+    asignacion: null
+  });
+
+  guardarEstadoAsentamiento();
+  mostrarNotificacion(`Nueva cuota ${naturaleza} agregada`, 'success');
+  renderizarPantalla();
 }
 
 function renderizarPestanaEdificios(a, stats) {
@@ -4997,3 +5668,5 @@ function confirmarMejora() {
   actualizarHUD();
   mostrarNotificacion(`🏗️ Mejora iniciada para ${instancia.nombre}`);
 }
+
+

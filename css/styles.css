@@ -6062,3 +6062,156 @@ details[open].panel-tributo .tributo-resumen::before {
     align-items: center;
     gap: 1rem;
 }
+
+/* =====================================================
+   COMMERCE ACTION BUTTONS
+   ===================================================== */
+
+.acciones-comercio {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+}
+
+.btn-accion {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+}
+
+.btn-accion:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.btn-accion.btn-editar:hover {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.btn-accion.btn-eliminar:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* Notification info type */
+.notificacion.info {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.9), rgba(37, 99, 235, 0.9));
+    border: 1px solid rgba(59, 130, 246, 0.5);
+}
+
+/* =====================================================
+   EVENTS TAB STYLES
+   ===================================================== */
+
+.panel-eventos {
+    max-width: 100%;
+}
+
+.panel-descripcion {
+    opacity: 0.7;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+}
+
+.evento-form {
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.evento-form h4 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: #a78bfa;
+}
+
+.form-grid-evento {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.btn-registrar-evento {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    border: none;
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+    margin-top: 1rem;
+}
+
+.btn-registrar-evento:hover {
+    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    transform: translateY(-1px);
+}
+
+.eventos-historial {
+    margin-top: 2rem;
+}
+
+.eventos-historial h4 {
+    margin-bottom: 1rem;
+    color: #e5e7eb;
+}
+
+.eventos-vacio {
+    text-align: center;
+    padding: 3rem;
+    opacity: 0.6;
+}
+
+.eventos-vacio .icono-vacio {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.tabla-eventos {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.tabla-eventos th {
+    text-align: left;
+    padding: 0.75rem;
+    border-bottom: 2px solid rgba(139, 92, 246, 0.3);
+    color: #a78bfa;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+}
+
+.tabla-eventos td {
+    padding: 0.75rem;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.tabla-eventos tr:hover {
+    background: rgba(139, 92, 246, 0.05);
+}
+
+.badge-evento {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.6rem;
+    background: rgba(139, 92, 246, 0.2);
+    border-radius: 6px;
+    font-size: 0.8rem;
+}
+
+.acciones-evento {
+    display: flex;
+    gap: 0.5rem;
+}
