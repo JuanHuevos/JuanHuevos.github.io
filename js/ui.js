@@ -569,6 +569,28 @@ function gestionarAsentamiento(id) {
   if (asentamiento) {
     estadoApp.asentamiento = asentamiento;
     estadoApp.asentamientoActual = asentamiento;
+
+    // CRITICAL: Load the simulation state for this settlement
+    if (asentamiento.simulacion) {
+      cargarEstadoSimulacion(asentamiento.simulacion);
+    } else {
+      // Initialize simulation if it doesn't exist
+      resetearSimulacion();
+      // Initialize population from settlement config
+      if (asentamiento.poblacion && Array.isArray(asentamiento.poblacion)) {
+        inicializarPoblacion(asentamiento.poblacion);
+      }
+      // Set initial doubloons
+      estadoSimulacion.doblones = asentamiento.doblones || 0;
+      // Initialize storage with 2 Alimento if first time
+      if (!estadoSimulacion.almacen || Object.keys(estadoSimulacion.almacen).length === 0) {
+        estadoSimulacion.almacen = { "Alimento": 2 };
+      }
+      // Save the initialized simulation state back to settlement
+      asentamiento.simulacion = JSON.parse(JSON.stringify(estadoSimulacion));
+      guardarExpedicion();
+    }
+
     estadoApp.pantalla = 'hud';
     renderizarPantalla();
   }
@@ -2239,15 +2261,47 @@ function confirmarCreacion() {
 
 function renderizarHUD(container) {
   const a = estadoApp.asentamiento;
-  const stats = calcularEstadisticasTotales(a);
-  const biomaActual = a.biomaFusionado || BIOMAS_BASE[a.biomaBase];
-  const modificadoresPropiedades = calcularModificadoresRecursos(a.propiedades);
 
-  // Quick stats calculations
+  // Defensive check
+  if (!a) {
+    container.innerHTML = `
+      <div class="hud-error">
+        <h2>⚠️ Error: No hay asentamiento seleccionado</h2>
+        <button class="btn-principal" onclick="volverALista()">Volver a la lista</button>
+      </div>
+    `;
+    return;
+  }
+
+  // Safe calculations with fallbacks
+  const stats = typeof calcularEstadisticasTotales === 'function'
+    ? calcularEstadisticasTotales(a)
+    : { calidadTotal: 0, grado: {}, bonificaciones: {}, mantenimientoEdificios: 0 };
+
+  const biomaActual = a.biomaFusionado || (typeof BIOMAS_BASE !== 'undefined' ? BIOMAS_BASE[a.biomaBase] : null) || {};
+  const modificadoresPropiedades = typeof calcularModificadoresRecursos === 'function'
+    ? calcularModificadoresRecursos(a.propiedades || [])
+    : {};
+
+  // Quick stats calculations with safe access
   const poblacionTotal = estadoSimulacion?.poblacion?.length || 0;
   const doblones = estadoSimulacion?.doblones || 0;
-  const alimentosEnAlmacen = estadoSimulacion?.almacen?.["Alimento"] || 0;
-  const calidad = stats.calidadTotal;
+  const turnoActual = estadoSimulacion?.turno || 0;
+
+  // Sum all food types in storage
+  let alimentosEnAlmacen = 0;
+  if (estadoSimulacion?.almacen) {
+    Object.entries(estadoSimulacion.almacen).forEach(([nombre, cantidad]) => {
+      const def = typeof RECURSOS !== 'undefined' ? RECURSOS[nombre] : null;
+      const esAlimento = nombre === "Alimento" ||
+        (def && (def.categoria === "Alimento" || (def.tags && def.tags.includes("Alimento"))));
+      if (esAlimento) alimentosEnAlmacen += cantidad;
+    });
+  }
+
+  const calidad = stats.calidadTotal || 0;
+  const influenciaData = typeof INFLUENCIA_MAGICA !== 'undefined' ? INFLUENCIA_MAGICA[a.influenciaMagica] : null;
+  const gradoData = typeof GRADOS !== 'undefined' ? GRADOS[a.grado] : null;
 
   container.innerHTML = `
     <div class="hud-container">
@@ -2256,19 +2310,25 @@ function renderizarHUD(container) {
         <div class="hud-header-left">
           ${a.imagenPersonalizada
       ? `<img src="${a.imagenPersonalizada}" class="hud-imagen-personalizada" alt="${a.nombre}">`
-      : `<span class="hud-icono-grande">${biomaActual?.icono || GRADOS[a.grado]?.icono || '🏕️'}</span>`
+      : `<span class="hud-icono-grande">${biomaActual?.icono || gradoData?.icono || '🏕️'}</span>`
     }
           <div class="hud-info-asentamiento">
             <h1 class="hud-nombre">${a.nombre}</h1>
             <div class="hud-meta">
-              <span class="hud-grado">${a.grado}</span>
-              <span class="hud-bioma">${a.biomaFusionado?.nombre || a.biomaBase}</span>
-              <span class="hud-magia ${a.influenciaMagica?.toLowerCase()}">${INFLUENCIA_MAGICA[a.influenciaMagica]?.icono} ${a.influenciaMagica}</span>
+              <span class="hud-grado">${a.grado || 'Estamento'}</span>
+              <span class="hud-bioma">${a.biomaFusionado?.nombre || a.biomaBase || 'Desconocido'}</span>
+              <span class="hud-magia ${(a.influenciaMagica || 'baja').toLowerCase()}">${influenciaData?.icono || '🔵'} ${a.influenciaMagica || 'Baja'}</span>
             </div>
           </div>
         </div>
         
         <div class="hud-header-center">
+          <!-- Turn Counter -->
+          <div class="hud-turno-display">
+            <span class="turno-label">Turno</span>
+            <span class="turno-numero">${turnoActual}</span>
+          </div>
+          
           <div class="hud-quick-stats">
             <div class="quick-stat" title="Cuotas de Población">
               <span class="qs-icon">👥</span>
@@ -2285,7 +2345,7 @@ function renderizarHUD(container) {
               <span class="qs-value">${estadoSimulacion?.recursosEspeciales?.influencia || 0}</span>
               <span class="qs-label">Influencia</span>
             </div>
-            <div class="quick-stat" title="Alimento en almacén">
+            <div class="quick-stat" title="Alimento en almacén (todos los tipos)">
               <span class="qs-icon">🌾</span>
               <span class="qs-value ${alimentosEnAlmacen < poblacionTotal ? 'warning' : ''}">${alimentosEnAlmacen}</span>
               <span class="qs-label">Alimento</span>
@@ -2299,8 +2359,18 @@ function renderizarHUD(container) {
         </div>
         
         <div class="hud-header-right">
-          <button class="btn-header" onclick="volverALista()" title="Ver Expedición">📋</button>
-          <button class="btn-header" onclick="mostrarOpciones()" title="Opciones">⚙️</button>
+          <div class="hud-acciones-turno">
+            <button class="btn-pasar-turno" onclick="btnPasarTurno()" title="Pasar al siguiente turno">
+              ⏭️ Pasar Turno
+            </button>
+            <button class="btn-deshacer" onclick="btnDeshacerTurno()" title="Deshacer último turno" ${(estadoSimulacion?.historialTurnos?.length || 0) === 0 ? 'disabled' : ''}>
+              ↩️
+            </button>
+          </div>
+          <div class="hud-nav-buttons">
+            <button class="btn-header" onclick="volverALista()" title="Ver Expedición">📋</button>
+            <button class="btn-header" onclick="mostrarOpciones()" title="Opciones">⚙️</button>
+          </div>
         </div>
       </header>
       
@@ -2426,13 +2496,6 @@ function renderizarNavegacionHUD() {
 
   return `
     <nav class="hud-nav">
-      <div class="nav-turno">
-        <span class="turno-badge">
-          <span class="turno-icono">📅</span>
-          <span class="turno-numero">${turnoActual}</span>
-        </span>
-      </div>
-      
       <div class="nav-tabs-container">
         ${pestanas.map(p => `
           <button class="nav-tab ${pestanaActiva === p.id ? 'activa' : ''}" 
@@ -2442,18 +2505,6 @@ function renderizarNavegacionHUD() {
             <span class="tab-label">${p.label}</span>
           </button>
         `).join('')}
-      </div>
-      
-      <div class="nav-acciones">
-        <button class="btn-turno btn-deshacer ${!puedeDeshacer ? 'disabled' : ''}" 
-                onclick="btnDeshacerTurno()" 
-                ${!puedeDeshacer ? 'disabled' : ''}
-                title="Deshacer último turno">
-          ⏪
-        </button>
-        <button class="btn-turno btn-avanzar" onclick="btnPasarTurno()" title="Pasar al siguiente turno">
-          Turno ⏩
-        </button>
       </div>
     </nav>
   `;

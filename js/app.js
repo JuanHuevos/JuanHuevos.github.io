@@ -98,6 +98,11 @@ function importarExpedicion(data) {
         if (estadoApp.expedicion.asentamientos.length > 0) {
             estadoApp.asentamientoActual = estadoApp.expedicion.asentamientos[0];
             estadoApp.asentamiento = estadoApp.asentamientoActual;
+
+            // CRITICAL: Load simulation state for the first settlement
+            if (estadoApp.asentamientoActual.simulacion) {
+                cargarEstadoSimulacion(estadoApp.asentamientoActual.simulacion);
+            }
         } else {
             estadoApp.asentamientoActual = null;
             estadoApp.asentamiento = null;

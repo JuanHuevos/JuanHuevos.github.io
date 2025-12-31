@@ -5941,3 +5941,124 @@ details[open].panel-tributo .tributo-resumen::before {
 .tabla-balance .fila-negativa {
     background: rgba(220,38,38,0.05);
 }
+
+/* =====================================================
+   IMPROVED HUD ELEMENTS
+   ===================================================== */
+
+/* Turn Counter */
+.hud-turno-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2));
+    border: 2px solid rgba(139, 92, 246, 0.5);
+    border-radius: 12px;
+    padding: 0.5rem 1rem;
+    min-width: 70px;
+    margin-right: 1rem;
+}
+
+.turno-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #a78bfa;
+    font-weight: 600;
+}
+
+.turno-numero {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+}
+
+/* Turn Action Buttons */
+.hud-acciones-turno {
+    display: flex;
+    gap: 0.5rem;
+    margin-right: 1rem;
+}
+
+.btn-pasar-turno {
+    background: linear-gradient(135deg, #10b981, #059669);
+    border: none;
+    color: white;
+    padding: 0.6rem 1.2rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.btn-pasar-turno:hover {
+    background: linear-gradient(135deg, #059669, #047857);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.btn-deshacer {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #9ca3af;
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 1rem;
+}
+
+.btn-deshacer:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+}
+
+.btn-deshacer:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Navigation Buttons */
+.hud-nav-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Error State */
+.hud-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 50vh;
+    gap: 1.5rem;
+    text-align: center;
+    color: #f87171;
+}
+
+.hud-error h2 {
+    font-size: 1.5rem;
+    margin: 0;
+}
+
+/* Warning state for stats */
+.qs-value.warning {
+    color: #fbbf24;
+    animation: pulse-warning 2s infinite;
+}
+
+@keyframes pulse-warning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Improved header layout */
+.hud-header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}

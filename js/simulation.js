@@ -263,29 +263,58 @@ function asignarPoblacionARecurso(idCuota, nombreRecurso) {
 
 /**
  * Ejecuta un turno completo (3 fases)
+ * @param {object} asentamiento - El asentamiento actual
+ * @returns {object} Resultado del turno con sustento, economia, crecimiento
  */
 function ejecutarTurno(asentamiento) {
+    // Defensive check
+    if (!asentamiento) {
+        console.error('ejecutarTurno: asentamiento is null or undefined');
+        return { error: 'No settlement provided', turno: estadoSimulacion.turno };
+    }
+
+    // Save snapshot for undo functionality BEFORE making changes
+    if (typeof guardarSnapshotTurno === 'function') {
+        guardarSnapshotTurno();
+    }
+
+    // Initialize log array
     estadoSimulacion.logTurno = [];
     estadoSimulacion.turno++;
 
     logear(`═══ TURNO ${estadoSimulacion.turno} ═══`);
 
-    // Fase 1: Sustento
-    const resultadoSustento = faseAlimentacion();
+    try {
+        // Fase 1: Sustento
+        const resultadoSustento = faseAlimentacion();
 
-    // Fase 2: Economía
-    const resultadoEconomia = faseEconomia(asentamiento);
+        // Fase 2: Economía
+        const resultadoEconomia = faseEconomia(asentamiento);
 
-    // Fase 3: Crecimiento
-    const resultadoCrecimiento = faseCrecimiento(asentamiento);
+        // Fase 2.5: Avanzar construcciones si existe la función
+        if (typeof avanzarConstrucciones === 'function') {
+            avanzarConstrucciones(asentamiento);
+        }
 
-    return {
-        turno: estadoSimulacion.turno,
-        sustento: resultadoSustento,
-        economia: resultadoEconomia,
-        crecimiento: resultadoCrecimiento,
-        log: estadoSimulacion.logTurno
-    };
+        // Fase 3: Crecimiento
+        const resultadoCrecimiento = faseCrecimiento(asentamiento);
+
+        return {
+            turno: estadoSimulacion.turno,
+            sustento: resultadoSustento,
+            economia: resultadoEconomia,
+            crecimiento: resultadoCrecimiento,
+            log: estadoSimulacion.logTurno
+        };
+    } catch (error) {
+        console.error('Error en ejecutarTurno:', error);
+        logear(`❌ Error durante el turno: ${error.message}`);
+        return {
+            turno: estadoSimulacion.turno,
+            error: error.message,
+            log: estadoSimulacion.logTurno
+        };
+    }
 }
 
 /**
