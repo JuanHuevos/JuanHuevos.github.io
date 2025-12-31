@@ -519,9 +519,23 @@ function faseCrecimiento(asentamiento) {
 
     // CÁLCULO DE HAMBRUNA (excluyendo Artificiales)
     const recursos = asentamiento.recursos || {};
-    const produccionBioma = calcularProduccionTotal(recursos, calidad);
+    const produccionBioma = calcularProduccionTotal(recursos, calidad, stats.bonificaciones || {});
     const produccionEdificios = calcularProduccionEdificios(asentamiento.edificios || [], stats);
-    let prodAlimento = (produccionBioma["Alimento"]?.medidas || 0) + (produccionEdificios["Alimento"]?.total || 0);
+
+    // Sumar todos los alimentos (no solo "Alimento")
+    let prodAlimento = 0;
+    Object.entries(produccionBioma).forEach(([nombre, data]) => {
+        const def = typeof RECURSOS !== 'undefined' ? RECURSOS[nombre] : null;
+        const esAlimento = nombre === "Alimento" ||
+            (def && (def.categoria === "Alimento" || (def.tags && def.tags.includes("Alimento"))));
+        if (esAlimento) prodAlimento += data.medidas || 0;
+    });
+    Object.entries(produccionEdificios).forEach(([nombre, data]) => {
+        const def = typeof RECURSOS !== 'undefined' ? RECURSOS[nombre] : null;
+        const esAlimento = nombre === "Alimento" ||
+            (def && (def.categoria === "Alimento" || (def.tags && def.tags.includes("Alimento"))));
+        if (esAlimento) prodAlimento += data.total || 0;
+    });
 
     // Solo las poblaciones que consumen alimentos cuentan
     const cuotasQueConsumen = estadoSimulacion.poblacion.filter(c => {
@@ -532,6 +546,8 @@ function faseCrecimiento(asentamiento) {
     const consumo = cuotasQueConsumen * 1;
     const balanceAlimentos = prodAlimento - consumo;
     const almacenAlimento = estadoSimulacion.almacen?.["Alimento"] || 0;
+
+    console.log('faseCrecimiento DEBUG:', { calidad, prodAlimento, consumo, balanceAlimentos, almacenAlimento });
 
     estadoSimulacion.esHambruna = false;
     let globalPuedeReproducir = true;
@@ -593,6 +609,15 @@ function faseCrecimiento(asentamiento) {
 
     logear(`  👥 Inmigración (${tipoInmigracion}): +${inmigracionTotal}`);
     logear(`  👶 Reproducción: ${Object.entries(reproduccionPorTipo).filter(([k, v]) => v > 0).map(([k, v]) => `${k}: +${v}`).join(', ') || 'Ninguna'}`);
+
+    console.log('faseCrecimiento IMMIGRATION:', {
+        inmigracionBase,
+        inmigracionTotal,
+        tipoInmigracion,
+        reproduccionPorTipo,
+        inmigracionPendientePorTipo: { ...estadoSimulacion.inmigracionPendientePorTipo },
+        CUOTA_POBLACION: CONVERSION.CUOTA_POBLACION
+    });
 
     // === CONSOLIDACIÓN POR TIPO ===
     let nuevasCuotas = 0;
@@ -1170,102 +1195,6 @@ function calcularProduccionEdificios(edificiosConstruidos, stats = null) {
     });
 
     return produccion;
-}
-
-/**
- * Fase 3: Crecimiento poblacional
- * Modificado: Tasa de natalidad depende del Balance de Alimentos > 0
- */
-function faseCrecimiento(asentamiento, balanceAlimentosLastTurn) {
-    logear("📍 Fase 3: Crecimiento");
-
-    const stats = calcularEstadisticasTotales(asentamiento);
-    const calidad = stats.calidadTotal;
-    const gradoData = GRADOS[asentamiento.grado];
-
-    // Inmigración latente
-    let inmigracion = gradoData.inmigracion + calidad;
-    estadoSimulacion.poblacion.forEach(cuota => {
-        const naturaleza = NATURALEZAS_POBLACION[cuota.naturaleza];
-        if (naturaleza) inmigracion += naturaleza.bonoInmigracion;
-    });
-
-    // Reproducción natural
-    // REGLA: "si Balance de Alimentos es mayor a 0, entonces tenemos Tasa de Natalidad. En caso contrario esta es 0."
-    let reproduccion = 0;
-
-    // Balance > 0 significa que sobró comida (Producción > Consumo)
-    // O que NO hubo hambruna y se produjo excedente?
-    // Usaremos el balance neto (Producido - Consumido) o el stock?
-    // "Balance de Alimentos" suele ser producción neta por turno.
-    if (balanceAlimentosLastTurn > 0) {
-        const plebeyos = obtenerCuotasPorRol("Plebeyo");
-        reproduccion = plebeyos.length; // 1 medida por cuota de Plebeyo
-        logear(`  👶 Tasa de Natalidad activa (Balance Alimentos > 0).`);
-    } else {
-        logear(`  ⚠️ Sin crecimiento natural (Balance Alimentos <= 0).`);
-    }
-
-    const totalCrecimiento = Math.max(0, inmigracion) + reproduccion;
-    estadoSimulacion.inmigracionPendiente += totalCrecimiento;
-
-    logear(`  👥 Inmigración: +${inmigracion}, Reproducción: +${reproduccion}`);
-
-    // Consolidar
-    let nuevasCuotas = 0;
-    while (estadoSimulacion.inmigracionPendiente >= CONVERSION.CUOTA_POBLACION) {
-        estadoSimulacion.inmigracionPendiente -= CONVERSION.CUOTA_POBLACION;
-        const maxId = Math.max(...estadoSimulacion.poblacion.map(c => c.id), 0);
-        estadoSimulacion.poblacion.push({
-            id: maxId + 1, rol: "Plebeyo", naturaleza: "Neutral",
-            medidas: CONVERSION.CUOTA_POBLACION, asignacion: null
-        });
-        nuevasCuotas++;
-    }
-
-    // Log final
-    if (nuevasCuotas > 0) logear(`  🎉 Nuevas cuotas formadas: ${nuevasCuotas}`);
-
-    return { inmigracion, reproduccion, nuevasCuotas };
-}
-
-/**
- * Ejecuta un turno completo (3 fases)
- */
-function ejecutarTurno(asentamiento) {
-    // Guardar snapshot para undo antes de cualquier cambio
-    guardarSnapshotTurno();
-
-    estadoSimulacion.logTurno = [];
-    estadoSimulacion.turno++;
-
-    logear(`═══ TURNO ${estadoSimulacion.turno} ═══`);
-
-    // Fase 1: Sustento (Consumo)
-    const resultadoSustento = faseAlimentacion(); // Retorna { consumido }
-
-    // Fase 2: Economía (Producción)
-    const resultadoEconomia = faseEconomia(asentamiento); // Retorna { produccion, tributos }
-
-    // Fase 2.5: Avanzar Construcciones en Progreso
-    const edificiosCompletados = avanzarConstrucciones(asentamiento);
-
-    // Calcular Balance de Alimentos del turno
-    // Producción de Alimento - Consumo Realizado
-    const prodAlimentos = resultadoEconomia.produccion["Alimento"]?.medidas || 0;
-    const consAlimentos = resultadoSustento.consumido || 0;
-    const balanceAlimentos = prodAlimentos - consAlimentos;
-
-    // Fase 3: Crecimiento
-    const resultadoCrecimiento = faseCrecimiento(asentamiento, balanceAlimentos);
-
-    return {
-        turno: estadoSimulacion.turno,
-        sustento: resultadoSustento,
-        economia: resultadoEconomia,
-        crecimiento: resultadoCrecimiento,
-        log: estadoSimulacion.logTurno
-    };
 }
 
 // Export for verification/tests
