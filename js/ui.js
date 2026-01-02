@@ -7367,7 +7367,9 @@ function exportarMapaCompleto() {
   mostrarNotificacion('📤 Mapa exportado correctamente');
 }
 
-// Import complete map data
+// Import complete map data with smart name matching
+// If imported map has markers with same name as existing settlements,
+// place those settlements at the marker locations
 function importarMapaCompleto(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -7376,12 +7378,81 @@ function importarMapaCompleto(event) {
   reader.onload = function (e) {
     try {
       const data = JSON.parse(e.target.result);
-      if (data.mapa) {
-        estadoApp.expedicion.mapa = data.mapa;
-        guardarExpedicion();
-        renderizarPantalla();
-        mostrarNotificacion('📥 Mapa importado correctamente');
+      if (!data.mapa) {
+        mostrarNotificacion('Archivo no contiene datos de mapa válidos', 'error');
+        return;
       }
+
+      // Initialize mapa if needed
+      if (!estadoApp.expedicion.mapa) {
+        estadoApp.expedicion.mapa = { config: { hexSize: 30, offsetX: 0, offsetY: 0, mostrarGrid: true, mostrarFow: true }, ubicaciones: {}, marcadores: [], hexesExplorados: {} };
+      }
+
+      const mapa = estadoApp.expedicion.mapa;
+      const asentamientos = estadoApp.expedicion.asentamientos || [];
+
+      // Copy map image and config
+      mapa.imagen = data.mapa.imagen || mapa.imagen;
+      mapa.config = { ...mapa.config, ...data.mapa.config };
+      mapa.hexesExplorados = data.mapa.hexesExplorados || mapa.hexesExplorados || {};
+
+      let asentamientosColocados = 0;
+      let marcadoresImportados = 0;
+
+      // Smart matching: Check imported asentamientos data
+      if (data.asentamientos && Array.isArray(data.asentamientos)) {
+        data.asentamientos.forEach(importedAsen => {
+          // Find matching settlement by name (case-insensitive)
+          const localAsen = asentamientos.find(a =>
+            a.nombre.toLowerCase() === importedAsen.nombre?.toLowerCase()
+          );
+
+          // Check if imported data has ubicaciones for this settlement
+          const importedUbicacion = data.mapa.ubicaciones?.[importedAsen.id];
+
+          if (localAsen && importedUbicacion) {
+            // Place local settlement at imported location
+            mapa.ubicaciones[localAsen.id] = { q: importedUbicacion.q, r: importedUbicacion.r };
+            asentamientosColocados++;
+          }
+        });
+      }
+
+      // Also check marcadores for settlement names
+      if (data.mapa.marcadores && Array.isArray(data.mapa.marcadores)) {
+        data.mapa.marcadores.forEach(marker => {
+          // Find matching settlement by marker name
+          const localAsen = asentamientos.find(a =>
+            a.nombre.toLowerCase() === (marker.nombre || marker.texto)?.toLowerCase()
+          );
+
+          if (localAsen && (marker.q !== undefined && marker.r !== undefined)) {
+            // Place local settlement at marker location
+            mapa.ubicaciones[localAsen.id] = { q: marker.q, r: marker.r };
+            asentamientosColocados++;
+          } else {
+            // Keep as marker if no match
+            if (!mapa.marcadores) mapa.marcadores = [];
+            // Avoid duplicate markers
+            const exists = mapa.marcadores.some(m =>
+              m.q === marker.q && m.r === marker.r && m.nombre === marker.nombre
+            );
+            if (!exists) {
+              mapa.marcadores.push(marker);
+              marcadoresImportados++;
+            }
+          }
+        });
+      }
+
+      guardarExpedicion();
+      renderizarPantalla();
+
+      let mensaje = '📥 Mapa importado';
+      if (asentamientosColocados > 0) mensaje += ` - ${asentamientosColocados} asentamiento(s) colocado(s)`;
+      if (marcadoresImportados > 0) mensaje += ` - ${marcadoresImportados} marcador(es) agregado(s)`;
+      mostrarNotificacion(mensaje);
+
     } catch (err) {
       mostrarNotificacion('Error al importar mapa: ' + err.message, 'error');
     }
